@@ -102,3 +102,11 @@ assert(
 const legacyPage2 = sandbox.buildLegacyServerHistoryUrl('https://www.amazon.com/gp/your-account/order-history', 2026, 2);
 assert(legacyPage2.includes('timeFilter=year-2026') && legacyPage2.includes('startIndex=10'), 'legacy server pagination remains available only for query-routed Amazon pages');
 console.log('business-first pagination tests passed');
+
+
+assert(sandbox.historyPageChanged(
+  { scannedUrl:'https://www.amazon.com/gp/your-account/order-history#time/2026/pagination/1/', historyOrderIds:[] },
+  { scannedUrl:'https://www.amazon.com/gp/your-account/order-history#time/2026/pagination/2/', historyOrderIds:[] }
+) === false, 'URL change without visible Order-ID fingerprint must not count as pagination progress');
+assert(typeof sandbox.syntheticDetailUrl === 'undefined', 'v0.17 must not expose a synthetic Order Details URL fallback');
+console.log('v0.17 background regressions passed');

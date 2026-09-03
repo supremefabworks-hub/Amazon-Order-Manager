@@ -15,9 +15,14 @@ This chat is disposable. Do **not** rely on memory or assumptions from any previ
 3. Read `README.md` and `TESTING.md`.
 4. Read `SESSION_PROTOCOL.md`.
 5. Read GitHub Issue **#7 — v0.17 authoritative details, return refresh, crawler and UI fixes** and any newer open issues that supersede it.
-6. Inspect the current root source tree and recent commits before making changes.
-7. If the active root source is incomplete or inconsistent, recover the exact v0.16.0 baseline from `source-snapshots/v0.16.0/full/` using its README and verify SHA-256 `0ac308d98a4acf47fff51f5fd63410a9e9dc8e6105e7d6f17dcebd9b6e71ac42` before using it.
-8. Treat the repository and GitHub issues as authoritative if anything in this prompt becomes stale.
+6. Inspect the current root source tree, manifest version, recent commits, open PRs/issues, and tests before making changes.
+7. Treat the repository and GitHub issues as authoritative if anything in this prompt becomes stale.
+
+## Current baseline
+
+The complete root source baseline is **v0.17.0**. The exact v0.16.0 package under `source-snapshots/v0.16.0/full/` is historical recovery/audit material only and must not replace the complete v0.17 root unless an intentional rollback is explicitly required.
+
+v0.17.0 implements the repository code/test scope for Issues #2–#7. The automated regression suite passes. Issue #7 remains open until the documented **live Amazon Business acceptance checklist** in `TESTING.md` is completed or any defects discovered by that live test are fixed.
 
 ## Current product contract
 
@@ -25,43 +30,47 @@ This is a Chrome Manifest V3 Amazon / Amazon Business Order Manager and Refund L
 
 The required crawler sequence is strict:
 
-`newest year -> page 1 -> capture every order -> complete canonical Order Details for every order -> next page -> repeat until no more pages -> next older year`
+`newest year -> page 1 -> capture every visible unique order -> complete canonical Order Details for every order -> next page -> repeat until no more pages -> next older year`
 
-Do not switch years while a valid next page exists. Do not count pagination as successful unless the visible Order-ID fingerprint changes. Repeated IDs/page content indicate failed pagination, not progress.
+Do not switch years while a valid next page exists. Do not count pagination as successful unless the non-empty visible Order-ID fingerprint changes. Repeated IDs/page content are failed pagination, not progress. A URL/hash change alone is not progress.
 
-**Order Details is canonical.** Every order must use its real `View order details` URL. A real `/spr/returns/prep` link found from Order Details may be followed only as secondary return-lifecycle enrichment for that same Order ID/item.
+**Order Details is canonical.** Every order must use its real `View order details` URL. Missing real detail links are a crawler stop condition; never synthesize a canonical Order Details URL.
+
+`Detailed` means a complete matching Order Details capture containing order date, order total, and at least one item title.
+
+A real `/spr/returns/prep` link found from Order Details may be followed only as secondary return-lifecycle enrichment for that same Amazon Order ID/item.
 
 Normal orders are not returns. `Return or replace items` availability alone must never create a return.
 
-Return records must be item-level for bundled orders: show the actual returned product and the expected refund amount for that returned item/return record, never the full bundled order total as the expected refund.
+Return records must be item-level for bundled orders: show the actual returned product and the expected refund amount for that returned item/return record, never the full bundled order total duplicated onto every returned item. Multiple separate returns under one Amazon Order ID must remain separate records.
 
-Return lifecycle must be evidence-based. In-progress returns must not be labeled `Refund issued` without authoritative milestone evidence. Future credit dates are ETAs, not completed credits. Bank credit confirmation remains isolated from the extension through the narrow reconciliation bridge described in the repo.
+Return lifecycle must be evidence-based. In-progress returns must not be labeled `Refund issued` without affirmative Amazon milestone evidence. Future credit dates are ETAs, not completed credits. Bank credit confirmation remains isolated from the extension through the narrow reconciliation bridge described in the repo.
 
-The dashboard must stay compact, symmetric, systematic, and never use horizontally scrollable order containers. All order statuses use the same row/grid structure. `Detailed` means a complete successful canonical Order Details capture, not merely discovered/queued.
+Payment-card last-four parsing must be scoped to actual payment-method/payment-information evidence. Never use arbitrary four-digit page text.
 
-Each order needs a large side-by-side action group including `Details`, `Credit`, `Reset`, and `Refresh`. `Refresh` must force a fresh background/inactive Order Details tab scan for that order and refresh its real return status when applicable.
+The dashboard must stay compact, symmetric, systematic, and never use horizontally scrollable order containers. All rows use the same grid and the same fixed four actions: `Details`, `Credit`, `Reset`, `Refresh`. Inapplicable actions are disabled rather than removed.
 
-Payment card last-four parsing must be scoped to actual payment-method/payment-information evidence. Never use arbitrary four-digit page text.
+`Refresh` must use the stored real Order Details URL, open an inactive/background Amazon detail tab, refresh the rendered canonical detail capture, follow real return-status links for the same order when present, save fresh state, and close the temporary tab.
 
-During active development, a manifest version change should wipe extension ledger/crawl state so each version starts clean. This is a development policy and must be easy to disable before production.
+During active development, a manifest version change wipes extension ledger/crawl state so each version starts clean. This is a development policy and must be disabled/replaced with migrations before production persistence is expected.
 
 ## Implementation behavior
 
 Work directly from the repository. Prefer concrete code changes over high-level advice. Preserve the security/privacy constraints in `AGENTS.md` and `PROJECT_HANDOFF.md`. Do not add CAPTCHA bypass, stealth/anti-detection behavior, password/cookie harvesting, or bank credentials to the extension.
 
-Run the documented regression tests before packaging. Add regression tests for every bug fixed. For Amazon-specific behavior that cannot be proven from fixtures, keep diagnostics/checkpoints explicit rather than guessing.
+Run `npm test` before packaging. Add regression tests for every bug fixed. For Amazon-specific behavior that cannot be proven from fixtures, use the live acceptance checklist and explicit diagnostics/checkpoints rather than guessing.
 
 When a coherent implementation pass is complete:
 
-- bump the extension version,
+- bump the extension version if producing a new test build,
 - update source/tests/docs,
 - update or close relevant GitHub issues,
-- update `PROJECT_HANDOFF.md` if architecture, current baseline, known bugs, or acceptance criteria changed,
+- update `PROJECT_HANDOFF.md` if architecture, current baseline, known bugs, live Amazon behavior, or acceptance criteria changed,
 - commit everything needed to resume in another fresh chat,
 - ensure no real Amazon exports, addresses, payment data, bank data, or Teach Mode logs are committed.
 
 Do not leave important project state only in this chat. The repository must remain sufficient for the next chat to continue without this conversation.
 
-Start by reporting what the repository says the current baseline is, the active issue/goal, whether the root source tree is complete, and the exact implementation plan. Then proceed with the work rather than asking me to restate prior context.
+Start by reporting the current baseline/version, active issue/goal, whether the root source tree is complete, and the exact plan. Then proceed with the work rather than asking me to restate prior context.
 
 ---

@@ -366,23 +366,25 @@ assert(currentDetailLinks.length === 1, 'current View order details route should
 assert(currentDetailLinks[0].url.includes('/your-orders/order-details?'), 'current /your-orders/order-details route should be preserved');
 assert(currentDetailLinks[0].url.includes('orderID=113-5152372-1721051'), 'current detail URL should preserve order ID');
 
-// v0.8: every history order gets a detail URL, even if one anchor is missing from the rendered DOM.
+// v0.17: visible orders and canonical detail links are tracked independently.
+// Missing anchors are a crawler stop condition, never permission to invent a canonical URL.
 const twoOrderHistoryDoc = {
   body: { innerText: 'Your Orders\nOrder # 113-5152372-1721051\nOrder # 114-1111111-2222222', textContent: '' },
   querySelectorAll(selector) { return selector === 'a[href]' ? [currentDetailAnchor] : []; },
   querySelector() { return null; }
 };
 const everyDetail = p.extractOrderDetailLinks(twoOrderHistoryDoc, 'https://www.amazon.com/your-orders/orders?orderFilter=year-2026');
-assert(everyDetail.length === 2, 'every Order ID on history must produce one detail link');
-const fallbackDetail = everyDetail.find(x => x.orderId === '114-1111111-2222222');
-assert(fallbackDetail && fallbackDetail.url === 'https://www.amazon.com/your-orders/order-details?orderID=114-1111111-2222222', 'missing detail anchor should use current Amazon detail route');
+assert(everyDetail.length === 1, 'only real rendered View order details links may become canonical detail links');
+assert(!everyDetail.some(x => x.orderId === '114-1111111-2222222'), 'missing detail anchor must not synthesize a canonical URL');
+const twoOrderParsed = p.parseDocument(twoOrderHistoryDoc, 'https://www.amazon.com/your-orders/orders?orderFilter=year-2026');
+assert(twoOrderParsed.historyOrderIds.length === 2, 'all visible Order IDs must remain in the history fingerprint');
 console.log('mandatory order-detail tests passed');
 
 
 // v0.8: Order Details URL must win over unrelated order IDs present elsewhere on the page.
 const detailWithRelatedOrderDoc = {
   title: 'Order Details',
-  body: { innerText: `Order placed September 1, 2026\nOrder # 113-5152372-1721051\nOrder Total: $456.78\nPayment Method\nAmazon Business Card ending in 4321\nExample primary item\nRelated order 114-9999999-8888888`, textContent: '' },
+  body: { innerText: `Order placed September 1, 2026\nOrder # 113-5152372-1721051\nOrder Total: $456.78\nPayment Method\nAmazon Business Card ending in 4321\nExample primary item\nQuantity: 1\nRelated order 114-9999999-8888888`, textContent: '' },
   querySelectorAll() { return []; },
   querySelector() { return null; }
 };
@@ -429,3 +431,38 @@ assert(immediateTitles[0] === 'Fallback Product Title From Amazon', 'blank produ
 const serverYear = p.buildServerHistoryUrl('https://www.amazon.com/gp/your-account/order-history#time/2026/pagination/1/', 2025, 3);
 assert(serverYear.includes('timeFilter=year-2025') && serverYear.includes('startIndex=20') && !serverYear.includes('#time/'), 'server history helper should use timeFilter + startIndex and clear hash');
 console.log('upstream exporter integration parser tests passed');
+
+
+// v0.17 regressions
+const unrelatedDigits = p.parseTextRecord('Order # 114-1234567-7654321 Tracking XXXX 4821 Invoice 2026', '114-1234567-7654321', { pageType: 'order' });
+assert(unrelatedDigits.cardLast4 === null, 'arbitrary four-digit page text must never become a payment card');
+const semanticPayment = p.parseTextRecord('Payment information\nVisa ending in 4821\nOrder total $19.99', '114-1234567-7654321', { pageType: 'order' });
+assert(semanticPayment.cardLast4 === '4821', 'semantic payment evidence should capture card last four');
+const unrelatedCardDoc = {
+  title: 'Order Details',
+  body: { innerText: 'Order placed Sep 2, 2026\nOrder # 114-1234567-7654321\nOrder Total: $19.99\nExample item\nQuantity: 1\nOld receipt note: Visa ending in 4821', textContent: '' },
+  querySelectorAll() { return []; },
+  querySelector() { return null; }
+};
+const unrelatedCardParsed = p.parseDocument(unrelatedCardDoc, 'https://www.amazon.com/your-orders/order-details?orderID=114-1234567-7654321');
+const unrelatedCardOrder = unrelatedCardParsed.records.find(record => record.recordType === 'order');
+assert(unrelatedCardOrder.cardLast4 === null, 'document parsing must not accept last four outside payment-method evidence');
+
+const noDetailAnchorDoc = {
+  body: { innerText: 'Your Orders\nOrder placed\nOrder # 114-8888888-9999999', textContent: '' },
+  querySelectorAll() { return []; },
+  querySelector() { return null; }
+};
+assert(p.extractOrderDetailLinks(noDetailAnchorDoc, 'https://www.amazon.com/gp/your-account/order-history').length === 0, 'history parser must not synthesize missing Order Details URLs');
+const noAnchorParsed = p.parseDocument(noDetailAnchorDoc, 'https://www.amazon.com/gp/your-account/order-history');
+assert(noAnchorParsed.historyOrderIds.includes('114-8888888-9999999'), 'visible Order IDs must remain in pagination fingerprint even if canonical link is missing');
+
+const staticTimelineOnly = p.parseTextRecord('Initiated Aug 30\nDropped off Aug 31\nRefund issued\nRefund credited Sep 7\n$75.00 will be credited by Sep 7', '114-2222222-3333333', { pageType: 'return' });
+assert(staticTimelineOnly.returnStage !== 'refund_issued' && staticTimelineOnly.returnStage !== 'credited', 'static timeline labels and future ETA must not prove refund issuance');
+
+const itemA = { recordType:'return', orderId:'114-3333333-4444444', returnToken:'RMA-ITEMS', itemNames:['Widget A'], asins:['B000000001'], refundAmount:10, provisionalReturn:false };
+const itemB = { ...itemA, itemNames:['Widget B'], asins:['B000000002'], refundAmount:20 };
+assert(p.makeRecordId(itemA) !== p.makeRecordId(itemB), 'multiple returned items under one return token need distinct item-level record IDs');
+assert(p.isCompleteCanonicalDetail({ recordType:'order', orderId:'114-3333333-4444444', orderDetailsUrl:'https://www.amazon.com/your-orders/order-details?orderID=114-3333333-4444444', orderDate:'Sep 1, 2026', purchaseAmount:20, itemNames:['Widget'] }, 'https://www.amazon.com/your-orders/order-details?orderID=114-3333333-4444444') === true, 'complete canonical detail should require real URL/date/total/item');
+assert(p.isCompleteCanonicalDetail({ recordType:'order', orderId:'114-3333333-4444444', orderDetailsUrl:'https://www.amazon.com/your-orders/order-details?orderID=114-3333333-4444444', orderDate:'Sep 1, 2026', purchaseAmount:20, itemNames:[] }, 'https://www.amazon.com/your-orders/order-details?orderID=114-3333333-4444444') === false, 'detail page without item capture must not be Detailed');
+console.log('v0.17 parser regressions passed');

@@ -224,7 +224,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .ledger-list { gap: 6px; }
 .ledger-order-card.ledger-order-line {
   display: grid;
-  grid-template-columns: 105px minmax(220px, 2fr) 82px 86px 78px minmax(310px, 1.45fr) auto;
+  grid-template-columns: 105px minmax(220px, 2fr) 82px 86px 78px minmax(280px, 1.35fr) 360px;
   gap: 10px;
   align-items: center;
   padding: 8px 10px;
@@ -271,15 +271,15 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .line-progress .credit-state { margin-top: 3px; padding: 2px 5px; font-size: 8px; }
 .line-progress .bank-match { margin-top: 3px; padding: 3px 5px; font-size: 8px; line-height: 1.15; }
 .line-progress .bank-match strong { font-size: 8px; }
-.line-actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; align-items: center; max-width: 125px; }
-.line-actions .mini { padding: 4px 6px; font-size: 9px; white-space: nowrap; }
+.line-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; align-items: stretch; width: 100%; max-width: none; }
+.line-actions .mini { padding: 10px 8px; min-height: 36px; font-size: 10px; white-space: nowrap; }
 .ledger-order-line.return-card-row { border-left-width: 3px; }
 .ledger-order-line.needs-review-card { background: #fffdf7; }
 .stat-review-total strong { color: #8a5b00; }
 
 @media (max-width: 1450px) {
   .ledger-order-card.ledger-order-line {
-    grid-template-columns: 92px minmax(180px, 1.8fr) 70px 74px 66px minmax(250px, 1.35fr) 106px;
+    grid-template-columns: 92px minmax(180px, 1.8fr) 70px 74px 66px minmax(220px, 1.2fr) 320px;
     gap: 7px;
   }
 }
@@ -288,7 +288,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
     grid-template-columns: 95px minmax(0, 1fr) 74px 78px 68px 100px;
   }
   .line-progress { grid-column: 2 / -1; }
-  .line-actions { grid-column: 1; grid-row: 2; justify-content: flex-start; max-width: none; }
+  .line-actions { grid-column: 1 / -1; grid-row: 2; max-width: none; }
 }
 @media (max-width: 720px) {
   .ledger-order-card.ledger-order-line {

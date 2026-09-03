@@ -115,6 +115,7 @@
     const item = record.itemNames?.[0] || `Return for order ${record.orderId}`;
     const amount = Number.isFinite(Number(record.refundAmount)) ? `$${Number(record.refundAmount).toFixed(2)}` : '';
     const expectedCredit = !progress.credited ? (record.expectedCreditDate || record?.returnMilestones?.expectedCreditDate || '') : '';
+    const orderDetailsUrl = record.orderDetailsUrl && /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|order-details)/i.test(record.orderDetailsUrl) ? record.orderDetailsUrl : '';
     const steps = [
       ['started', 'Initiated', progress.started, milestoneDate(record, 'started')],
       ['shipped', 'Dropped off', progress.shippedOrReceived, milestoneDate(record, 'shipped')],
@@ -127,7 +128,7 @@
       <div class="track"><div class="rail"><i style="width:${progress.percent}%"></i></div>
         ${steps.map((step, index) => `<div class="step ${step[2] ? 'done' : ''}"><em>${step[2] ? '✓' : ''}</em><small>${esc(step[3] || '')}</small><span>${esc(step[1])}</span></div>`).join('')}
       </div>
-      <a href="https://www.amazon.com/your-orders/order-details?orderID=${esc(record.orderId)}" target="_blank" rel="noopener">Open order details</a>
+      ${orderDetailsUrl ? `<a href="${esc(orderDetailsUrl)}" target="_blank" rel="noopener">Open order details</a>` : ''}
     </section>`;
   }
 
@@ -267,9 +268,10 @@
         const orderId = String(message.orderId || '').trim();
         const rawUrl = String(message.url || '').trim();
         if (!/^\d{3}-\d{7}-\d{7}$/.test(orderId)) return { ok: false, error: 'Invalid Amazon order ID.' };
+        if (!rawUrl) return { ok: false, error: 'Missing real Order Details URL.' };
         let url;
         try {
-          url = new URL(rawUrl || `/your-orders/order-details?orderID=${encodeURIComponent(orderId)}`, location.origin);
+          url = new URL(rawUrl, location.origin);
         } catch (_) {
           return { ok: false, error: 'Invalid Order Details URL.' };
         }
@@ -301,13 +303,35 @@
           const doc = new DOMParser().parseFromString(html, 'text/html');
           const finalUrl = response.url || url.toString();
           const parsed = parser.parseDocument(doc, finalUrl);
-          const matching = (parsed.records || []).filter(record => record?.recordType === 'order' && record?.orderId === orderId);
+          const matching = (parsed.records || []).filter(record => record?.recordType === 'order' && record?.orderId === orderId && record?.detailScanComplete);
           if (!matching.length) {
-            return { ok: false, error: `Order Details HTML did not contain order ${orderId}.`, scannedUrl: finalUrl };
+            return { ok: false, error: `Order Details HTML for ${orderId} was incomplete or did not match the canonical order.`, scannedUrl: finalUrl };
           }
           let save = null;
           if (parsed.records?.length) save = await storage.upsertRecords(parsed.records);
-          return { ok: true, ...parsed, save, scannedUrl: finalUrl, fetchedOrderDetails: true };
+          const returnRefreshes = [];
+          for (const link of (parsed.returnLinks || []).filter(link => link?.orderId === orderId && link?.url)) {
+            const returnUrl = new URL(link.url, finalUrl);
+            if (!/(^|\.)amazon\.com$/i.test(returnUrl.hostname) || !/\/spr\/returns\/prep/i.test(returnUrl.pathname)) continue;
+            const returnResponse = await fetch(returnUrl.toString(), { credentials: 'include', cache: 'no-store', redirect: 'follow' });
+            if (!returnResponse.ok) {
+              const returnRateLimited = returnResponse.status === 429 || returnResponse.status === 503;
+              return { ok: false, rateLimited: returnRateLimited, error: returnRateLimited ? 'Amazon throttled the return-status refresh.' : `Amazon return status returned HTTP ${returnResponse.status}.` };
+            }
+            const returnHtml = await returnResponse.text();
+            const returnProbe = String(returnHtml || '').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ');
+            const returnBlocked = /sorry,? we just need to make sure|not a robot|enter the characters you see below|type the characters you see|captcha/i.test(returnProbe);
+            const returnSignIn = /email or mobile phone number|enter your password|<title>\s*amazon sign-in/i.test(returnProbe);
+            if (returnBlocked || returnSignIn) return { ok: false, blocked: true, error: returnBlocked ? 'Amazon requested human verification during return refresh.' : 'Amazon requires sign-in during return refresh.' };
+            const returnDoc = new DOMParser().parseFromString(returnHtml, 'text/html');
+            const returnFinalUrl = returnResponse.url || returnUrl.toString();
+            const returnParsed = parser.parseDocument(returnDoc, returnFinalUrl);
+            const returnRecords = (returnParsed.records || []).filter(record => record?.recordType === 'return' && record?.orderId === orderId && record?.authoritativeReturnCapture);
+            if (!returnRecords.length) return { ok: false, error: `Return status for ${orderId} did not contain an authoritative return record.` };
+            const returnSave = await storage.upsertRecords(returnRecords);
+            returnRefreshes.push({ url: returnFinalUrl, records: returnRecords.length, save: returnSave });
+          }
+          return { ok: true, ...parsed, save, scannedUrl: finalUrl, fetchedOrderDetails: true, returnRefreshes };
         } catch (error) {
           return { ok: false, error: error?.message || String(error) };
         }

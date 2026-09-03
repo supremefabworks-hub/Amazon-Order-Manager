@@ -17,7 +17,7 @@ const chrome = {
   },
   alarms: { create: noop, onAlarm: { addListener: noop } },
   tabs: { onRemoved: { addListener: noop }, onUpdated: { addListener: noop, removeListener: noop } },
-  runtime: { onMessage: { addListener: noop }, onStartup: { addListener: noop }, onInstalled: { addListener: noop } }
+  runtime: { getManifest: () => ({ version: '0.17.0' }), onMessage: { addListener: noop }, onStartup: { addListener: noop }, onInstalled: { addListener: noop } }
 };
 const sandbox = { chrome, URL, console, setTimeout: () => 0, clearTimeout: noop, Date, Math };
 vm.createContext(sandbox);
@@ -60,6 +60,27 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
   state = store.backgroundScanState;
   assert(state.crawl.overlapCount === 0, 'same-page rescan must not be counted as overlap');
   assert(state.queue.filter(j => j.type === 'detail').length === 9, 'same-page rescan must not duplicate detail jobs');
+
+  let missingLinkStopped = false;
+  try {
+    await sandbox.queueManagedHistoryResult({ scannedUrl:'https://www.amazon.com/gp/your-account/order-history#time/2026/pagination/2/', historySelectedYear:2026, historyYears:[2026,2025], historyOrderIds:['113-2000000-2000000'], detailLinks:[] }, { historyYear:2026, historyPage:2, crawlManaged:true });
+  } catch (error) { missingLinkStopped = /Missing real View order details URL/.test(String(error.message || error)); }
+  assert(missingLinkStopped, 'managed crawl must stop if a visible order lacks its real View order details URL');
+
+  store.ledger = [{ recordId:'order:test', orderId:'113-0000000-0000000' }];
+  store.backgroundScanState = { running:true };
+  store.installedExtensionVersion = '0.16.0';
+  await sandbox.ensureDevelopmentVersionState();
+  assert(store.ledger === undefined, 'version change should wipe development ledger state');
+  assert(store.backgroundScanState === undefined, 'version change should wipe crawl checkpoint state');
+  assert(store.installedExtensionVersion === '0.17.0', 'version reset should store new manifest version');
+
+  delete store.installedExtensionVersion;
+  store.ledger = [{ recordId:'order:legacy', orderId:'113-1111111-1111111' }];
+  store.backgroundScanState = { running:true };
+  await sandbox.ensureDevelopmentVersionState('0.16.0');
+  assert(store.ledger === undefined && store.backgroundScanState === undefined, 'upgrade previousVersion must wipe legacy state even before VERSION_KEY existed');
+  assert(store.installedExtensionVersion === '0.17.0', 'legacy upgrade reset should persist v0.17 version key');
 
   console.log('strict crawl state-machine tests passed');
 })().catch(err => { console.error(err); process.exit(1); });

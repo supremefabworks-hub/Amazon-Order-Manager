@@ -1,158 +1,224 @@
 # Project Handoff — Amazon Order Manager
 
-## Purpose
+## Current baseline
 
-Chrome Manifest V3 extension for scanning Amazon / Amazon Business order history, building one durable record per Order ID, tracking actual returns and refund progress, and reconciling Amazon-issued refunds against separately connected financial accounts without exposing bank credentials to the extension.
+Chrome Manifest V3 Amazon / Amazon Business Order Manager and Refund Ledger.
 
-The repository is the source of truth. Current imported baseline: **v0.16.0**. The next implementation pass should be **v0.17.0** and should address the open issues below before adding unrelated features.
+**Current source baseline: v0.17.0.** The root source tree is complete and is the active development source. The exact pre-GitHub v0.16.0 archive remains under `source-snapshots/v0.16.0/full/` for historical recovery only.
 
-## Core product requirements
+v0.17.0 implements the code/test scope of Issues #2–#7. Automated Node regressions pass. **Live Amazon Business acceptance is still required before Issue #7 should be considered fully closed**, because repository fixtures cannot prove the account-specific live pager, rendered Order Details markup, or live return-page markup.
 
-1. **Lifetime order crawl**
-   - Scan newest year first.
-   - For each year, process page 1, page 2, page 3, etc. until Amazon exposes no further page.
-   - Only then switch to the next older year.
-   - Preserve a persistent checkpoint so Stop/Resume continues from the exact year/page/order position.
-   - Deduplicate globally by Amazon Order ID and record overlap rather than creating duplicate orders.
+## Product contract
 
-2. **Order Details are canonical**
-   - Every order discovered from history must have its actual `View order details` URL captured.
-   - Canonical URL shape currently observed on Amazon Business US: `https://www.amazon.com/your-orders/order-details?orderID=<ORDER_ID>&ref=ab_ppx_yo_dt_b_fed_order_details`.
-   - Product title, order total, payment method/card, order status, order date, and item details should come from this page whenever available.
-   - v0.16 fetches the real Order Details URL using authenticated same-origin `fetch(..., { credentials: "include" })` and parses the returned HTML with `DOMParser`. This design was adapted from Xenolphthalein/order-history-exporter-for-amazon.
+### 1. Strict lifetime crawler
 
-3. **Return status is secondary enrichment, not the order source**
-   - An Order Details page may contain a real return-status link like `/spr/returns/prep?...`.
-   - Follow that URL only to refresh the return lifecycle for the same Order ID.
-   - Do not use a generic `Return or replace items` link as proof that a return was started.
-   - Do not replace the canonical Order Details record with a return page.
+Required sequence:
 
-4. **Return lifecycle**
-   - Desired milestones: `Initiated -> Dropped off / shipped -> Refund issued -> Bank credited`.
-   - A future Amazon date such as `credited by Sep 7` is an ETA and must display as `Expected by Sep 7`, not a completed credit.
-   - `Refund issued` must require strong evidence. Generic refund wording, a return-status link, or an expected amount must not promote an in-progress return to issued.
-   - Status should not regress when a stale/less-specific page is scanned after a newer authoritative status.
+`newest year -> page 1 -> capture every visible unique Order ID -> complete canonical Order Details for every order -> next page -> repeat until no more pages -> next older year`
 
-5. **Bundled / multi-item orders**
-   - Return records are item-level inside an order.
-   - Always show the actual returned product(s), not the whole bundled order as the return subject.
-   - Expected refund is the expected amount for that returned item/return record, not the order total.
-   - An order may have multiple separate return records and amounts.
+Rules:
 
-6. **Dashboard**
-   - Primary filters: `All orders`, `Returns`, `Needs review`.
-   - One consistent row/grid template for every order regardless of status.
-   - No horizontally scrollable order containers at any viewport width.
-   - Compact line-item layout so many orders are visible at once.
-   - `Needs review` dollar total must equal the sum of expected refund amounts of the return records currently flagged Needs Review.
-   - Large fixed action group, side by side: `Details`, `Credit`, `Reset`, plus `Refresh` after v0.17.
-   - The `Detailed` badge should mean the complete Order Details refresh succeeded, not merely that an order was seen or queued.
+- Never switch years while Amazon still exposes an enabled next-page control.
+- Pagination progress is accepted **only** when the visible Order-ID fingerprint changes.
+- URL/hash changes without a changed non-empty Order-ID fingerprint are not progress.
+- Repeated page contents are failed pagination and stop/retry at the same checkpoint.
+- Keep exact year/page/order checkpoint state.
+- Deduplicate globally by Amazon Order ID.
+- Orders repeated across history pages are overlap evidence, not duplicate order records.
+- A visible history Order ID with no real `View order details` URL is a hard crawler stop. v0.17 does **not** synthesize a canonical Order Details URL.
 
-7. **Per-order forced refresh**
-   - Add a Refresh button next to every order.
-   - User-requested behavior: force-open an inactive/background Amazon Order Details tab, parse fresh data for that one order, follow any existing return-status link for lifecycle refresh, save the result, then close/reuse the worker tab.
-   - This is intentionally different from bulk same-origin fetch so there is a strong manual recovery path when fetched HTML differs from rendered Amazon state.
-
-8. **Payment card parsing**
-   - Known bug in v0.16: wrong last-four can be assigned because the parser can pick an unrelated 4-digit token from the page.
-   - v0.17 must scope extraction to actual payment-method / payment-information DOM sections and require local semantic evidence such as `Visa ending in 1234`, `Mastercard ending in`, `Amex`, `payment method`, etc.
-   - Do not use a naked `\b\d{4}\b` match across page text.
-
-9. **Bank credit reconciliation**
-   - The extension must never receive bank credentials, financial-connection tokens, or the full financial transaction feed.
-   - Current secure bridge: extension exports narrow refund verification request JSON; ChatGPT can reconcile against separately connected financial accounts; user imports narrow verification result JSON.
-   - Pending or ambiguous matches do not count as credited.
-
-## Amazon Business navigation observed in Teach Mode
-
-The tested account uses client-side hash routes when the visible year/pager is used:
+Observed Amazon Business UI remains hash-routed, for example:
 
 - `#time/2026/pagination/1/`
 - `#time/2026/pagination/2/`
 - `#time/2026/pagination/3/`
 
-The page also exposes a `timeFilterDropdown` containing year values such as `2026`, `2025`, `2024`, etc.
+Prefer Amazon's real numbered pager / Next control. Legacy `timeFilter/startIndex` pagination is retained only for query-routed non-Business compatibility and must not be used as the primary Business traversal.
 
-The upstream exporter commonly synthesizes `?timeFilter=year-YYYY&startIndex=10`, but that behavior was observed to re-serve page 1 in this Amazon Business UI. Therefore:
+### 2. Order Details is canonical
 
-- Prefer the actual visible numeric pager / Next control and verify the Order-ID fingerprint changed.
-- Do not count a new page merely because `location.href` changed.
-- Do not switch year while a valid next page exists.
-- If page IDs repeat, treat it as failed pagination/retry, not progress.
+Every order must retain the real Amazon `View order details` URL discovered from history.
 
-## Upstream implementation reviewed
+Canonical detail parsing is successful only when:
 
-Repository: `Xenolphthalein/order-history-exporter-for-amazon`
+- the page is an Amazon Order Details route,
+- the URL Order ID matches the order being captured,
+- an order date is captured,
+- an order total is captured,
+- at least one item title is captured.
 
-Useful patterns already adopted:
+Only then is `detailScanComplete=true`; only those orders may display the `Detailed` badge.
 
-- Real Order Details URL detection: `a[href*="order-details"], a[href*="orderID="], a[href*="orderId="]`.
-- Authenticated same-origin Order Details fetch with `credentials: "include"`.
-- `DOMParser` parsing of fetched Order Details HTML.
-- Product-title fallback chain: link text -> nearby title node -> title/aria-label -> image alt.
-- One record per unique Order ID.
+Bulk lifetime crawling may continue to fetch the real captured Order Details URL through the authenticated Amazon content-script context with `credentials: "include"` and parse it with `DOMParser`. It may not invent the URL.
 
-Not suitable as-is for this Amazon Business account: its `startIndex += 10` / `timeFilter=year-YYYY` page traversal.
+### 3. Return lifecycle is secondary enrichment
 
-Upstream is Unlicense/public domain.
+A normal order is not a return. `Return or replace items`, `Start a return`, or return eligibility alone must never create a return.
 
-## Current code structure
+A real existing return-status URL such as `/spr/returns/prep?...` discovered from Order Details may be followed only for that same Amazon Order ID to refresh return lifecycle data.
 
-- `manifest.json` — MV3 manifest.
-- `background.js` — worker queue, crawl state machine, tabs, alarms, throttling/backoff.
-- `content.js` — Amazon-page integration, automatic page scan, UI injection.
-- `parser.js` — order/history/detail/return parsing.
-- `storage.js` — ledger model, merge semantics, status summaries, bank reconciliation import/export.
-- `dashboard.html/js` + `ui.css` — full ledger UI.
-- `popup.html/js` — compact extension menu/status.
-- `workflow-recorder.js` — Teach Mode recorder used to capture live Amazon UI mechanics.
-- `*-test.js` — Node regression tests.
+Bulk detail refresh follows real `/spr/returns/prep` links through the authenticated Amazon session and parses the returned HTML. The explicit per-order dashboard **Refresh** action uses a separate rendered inactive/background Amazon tab as the stronger manual recovery path.
 
-## Required next changes (v0.17)
+Return lifecycle remains evidence-based:
 
-1. Fix payment last-four scoping.
-2. Refresh return state by following real return-status link found on Order Details.
-3. Prevent false `Refund issued` classification for returns still in progress.
-4. Make `Detailed` mean a successful complete canonical detail capture.
-5. Add per-order forced background-tab Refresh.
-6. Map each return to the actual item(s) and item-level expected refund amount in bundled orders.
-7. Make every dashboard row use the exact same column/grid structure.
-8. Make Details / Credit / Reset / Refresh buttons approximately 3x current clickable size while staying side-by-side.
-9. Keep processing all pages of a year; switch to older year only after end-of-year pagination is proven.
-10. Add automatic clean-ledger reset on extension version change, because the current development preference is to wipe data for each version while iterating.
+`Initiated -> Dropped off / shipped -> Amazon received -> Refund issued -> Bank credited`
 
-## Development reset policy
+- Static timeline labels are not completion evidence by themselves.
+- `Refund issued` requires affirmative Amazon issuance wording.
+- A future `credited by <date>` value is stored/displayed as an ETA, never as completed credit.
+- Return stage merge is monotonic; stale scans cannot regress a later authoritative stage.
+- Bank credit confirmation remains separate from Amazon lifecycle state.
 
-During active development, requested behavior is fresh data on every version bump:
+### 4. Bundled / multi-item returns
 
-- Store installed extension version in `chrome.storage.local`.
-- On service-worker startup/install/update, compare with `chrome.runtime.getManifest().version`.
-- When version differs, clear extension ledger/crawl state and seed defaults, then store the new version.
-- Mark this as a development policy so it can be disabled before production releases where users expect migration.
+Return records are item-level under one canonical order.
 
-## Testing acceptance criteria
+v0.17 return record identity includes the return token plus the returned item identity, allowing multiple returned items and multiple separate returns under one Amazon Order ID.
+
+Rules:
+
+- The returned item title/ASIN must come from return-scoped evidence.
+- A provisional return discovered from an Order Details status link must not copy all bundled order items and pretend they were returned.
+- When an authoritative return page arrives, provisional item names/ASINs are replaced by the authoritative returned-item data.
+- If multiple returned items are present, each record gets its own locally scoped expected-refund amount when Amazon exposes it.
+- A whole return/order total must not be duplicated onto every returned item. If an item-specific amount cannot be proven for a multi-item return, leave that item's amount unknown rather than assigning the bundle total.
+
+### 5. Payment-card last four
+
+Card last-four extraction is restricted to payment-method/payment-information evidence.
+
+- DOM parsing first collects payment-scoped elements.
+- If Amazon lacks useful payment selectors, a narrow local text window beginning at `Payment method` or `Payment information` may be used.
+- Whole-page text is not used as a fallback during document parsing.
+- Arbitrary masked four-digit text elsewhere on the page must remain ignored.
+
+### 6. Dashboard
+
+Primary views remain:
+
+- `All orders`
+- `Returns`
+- `Needs review`
+
+Every order uses the same fixed row/grid structure. Rows do not become horizontally scrollable.
+
+Every row has the same four side-by-side actions:
+
+- `Details`
+- `Credit`
+- `Reset`
+- `Refresh`
+
+Inapplicable actions are disabled rather than removed so the grid remains symmetric.
+
+`Refresh`:
+
+1. requires the stored real Order Details URL,
+2. opens an inactive Amazon Order Details tab,
+3. parses the rendered canonical detail page,
+4. requires a complete matching canonical capture,
+5. follows real `/spr/returns/prep` links for the same order when present,
+6. saves authoritative return records,
+7. closes the temporary refresh tab.
+
+`Needs review` dollar total is the sum of expected refund amounts for the return records currently flagged Needs Review.
+
+### 7. Development reset policy
+
+During active development `DEV_RESET_ON_VERSION_CHANGE` is enabled in `background.js`.
+
+On an extension version change, v0.17 clears local ledger/crawl/worker/workflow/bank-verification state and stores the new manifest version. The `runtime.onInstalled` previous-version hint is used so an upgrade from v0.16 resets correctly even though v0.16 did not yet store the new version key.
+
+Disable or replace this destructive development behavior with migrations before a production release where users expect ledger persistence across versions.
+
+### 8. Bank reconciliation privacy boundary
+
+Bank credentials, financial-provider tokens, and full bank transaction feeds never enter the extension.
+
+The supported bridge remains narrow:
+
+1. extension exports refund verification request JSON,
+2. reconciliation occurs outside the extension against separately connected financial accounts,
+3. extension imports narrow verification-result JSON.
+
+Only posted/confirmed evidence completes `Bank credited`. Pending, ambiguous, or not-found matches do not.
+
+## Current source structure
+
+- `manifest.json` — MV3 manifest, version 0.17.0.
+- `background.js` — queue, strict crawl state machine, fingerprint validation, rendered per-order refresh, development version reset.
+- `content.js` — Amazon page scan, authenticated canonical detail fetch, real return-status enrichment.
+- `parser.js` — history/detail/return parsing, payment scoping, item-level return parsing.
+- `storage.js` — canonical ledger merge, monotonic return state, provisional-to-authoritative return replacement, reconciliation state.
+- `dashboard.html` / `dashboard.js` / `ui.css` — fixed compact order grid and four-action row layout.
+- `popup.html` / `popup.js` — compact extension status/menu.
+- `workflow-recorder.js` — Teach Mode diagnostics; do not commit real account logs.
+- `parser-test.js`, `storage-test.js`, `background-test.js`, `state-machine-test.js`, `reconciliation-test.js`, `ui-test.js` — regression suites.
+
+## Automated validation
 
 Run:
+
+```bash
+npm test
+```
+
+v0.17.0 test command executes:
 
 - `node parser-test.js`
 - `node storage-test.js`
 - `node background-test.js`
 - `node state-machine-test.js`
 - `node reconciliation-test.js`
+- `node ui-test.js`
 
-Live Amazon Business acceptance:
+The v0.17 candidate passed the complete suite in GitHub Actions before release review.
 
-- History counter goes beyond page 1 while staying in the same year.
-- Order IDs on page N differ from page N-1 before page N is accepted.
-- Last page of year triggers next older year, not a loop.
-- Every displayed `Detailed` order has a successful canonical Order Details parse.
-- Wrong unrelated four-digit values never become card endings.
-- A normal order with `Return or replace items` remains a normal order.
-- A real existing return-status link creates/updates an item-level return record.
-- Return in progress does not show Refund issued until authoritative evidence exists.
-- Bundle order shows returned product + return amount for that product.
-- Dashboard remains symmetric and has no side-scrolling order list.
+Important v0.17 regression coverage includes:
 
-## Privacy / security
+- no synthesized canonical Order Details URL,
+- visible Order IDs remain independent from discovered detail links,
+- URL-only pagination change is rejected,
+- missing real detail link stops managed crawl,
+- unrelated four-digit text is not a payment card,
+- payment scope does not fall back to whole-page text,
+- future credit ETA does not become completed credit,
+- item-level return IDs and refund amounts,
+- authoritative return capture replaces provisional bundled-item contamination,
+- version-change clean reset, including v0.16 -> v0.17 with no prior version key,
+- fixed Details / Credit / Reset / Refresh UI and enlarged click targets,
+- no horizontal order scrolling.
 
-Do not commit exported Amazon order history, Teach Mode logs from a real account, bank reconciliation request/result files, addresses, card numbers, or other user data. Keep fixtures synthetic.
+## Required live Amazon Business acceptance for v0.17
+
+Still verify on the user's actual Amazon Business account:
+
+1. Start with a clean v0.17 ledger after reload/update.
+2. 2026 page 1 -> page 2 -> page 3 advances with different visible Order-ID fingerprints.
+3. The crawler does not switch to 2025 while an enabled 2026 Next control exists.
+4. A repeated page/fingerprint stops or retries instead of counting progress.
+5. Every row labeled `Detailed` came from a complete matching real Order Details URL.
+6. Missing real `View order details` anchors stop the crawler rather than fabricating URLs.
+7. Card last four matches Amazon payment-method/payment-information evidence only.
+8. A normal order with only `Return or replace items` stays a normal order.
+9. A real existing `/spr/returns/prep` link updates the same order's return lifecycle.
+10. An in-progress return never displays `Refund issued` without affirmative Amazon issuance evidence.
+11. Bundled orders show only the actual returned product(s) and item/return-specific expected refund amounts.
+12. Two separate returns under one Amazon Order ID remain separate records.
+13. Per-order `Refresh` opens an inactive detail tab, updates rendered detail/return state, and closes the tab.
+14. All rows remain symmetric with four side-by-side actions and no horizontal order-container scrolling.
+15. Needs Review total equals the expected-refund sum of currently flagged return records.
+
+## Security / privacy
+
+Never commit real Amazon exports, Order IDs used as private fixtures, addresses, authentication/session data, payment numbers, bank data, reconciliation request/result files, or real Teach Mode logs.
+
+Do not add CAPTCHA bypass, stealth/anti-detection behavior, cookie/password harvesting, or bank credentials.
+
+## Recovery
+
+The historical exact v0.16.0 packaged ZIP remains archived at `source-snapshots/v0.16.0/full/` with documented SHA-256:
+
+`0ac308d98a4acf47fff51f5fd63410a9e9dc8e6105e7d6f17dcebd9b6e71ac42`
+
+It is recovery/audit material only. Do not replace the complete v0.17 root tree with v0.16 unless the current root is proven corrupt and the rollback is intentional.
