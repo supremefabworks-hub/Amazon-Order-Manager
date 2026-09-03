@@ -47,7 +47,9 @@ function Show-Diagnostics {
         $key = Get-Item -LiteralPath $registryPath -ErrorAction Stop
         $registered = $key.GetValue('')
     } catch {}
-    Write-Host "Registry manifest: $($registered ?? '(missing)')"
+    $registeredDisplay = '(missing)'
+    if ($null -ne $registered -and -not [string]::IsNullOrWhiteSpace([string]$registered)) { $registeredDisplay = [string]$registered }
+    Write-Host "Registry manifest: $registeredDisplay"
     $currentManifest = Join-Path $CurrentDirectory 'manifest.json'
     if (Test-Path $currentManifest) {
         try {

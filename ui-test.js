@@ -16,6 +16,9 @@ assert(css.includes('min-height: 36px'), 'actions must use enlarged click target
 assert(css.includes('overflow-x: hidden'), 'ledger must continue forbidding horizontal order scrolling');
 assert(dashboard.includes('groupReturnRecords'), 'dashboard must group child return records by Amazon return token');
 assert(dashboard.includes('canonicalRefundTotal'), 'dashboard must prefer canonical Order Details Refund Total');
+assert(!dashboard.includes('order?.detailScanComplete ? order?.refundAmount'), 'dashboard must never use generic order refund prose as canonical Refund Total');
+assert(content.includes('applySingleReturnIdentityHint'), 'return-page refresh must preserve exact Order Details itemId identity across redirects');
+assert(background.includes('returnItemId: link.returnItemId'), 'rendered per-order Refresh must pass exact return item identity to the worker scan');
 assert(dashboard.includes('refundAmountMismatch'), 'dashboard must flag child-return totals that exceed canonical refund total');
 assert(dashboard.includes('Return ${index}'), 'dashboard must render distinct compact child return blocks');
 console.log('ui regression tests passed');

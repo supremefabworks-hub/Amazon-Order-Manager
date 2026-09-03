@@ -166,6 +166,23 @@
     }
   }
 
+
+  function applySingleReturnIdentityHint(records, hint) {
+    const list = Array.isArray(records) ? records.slice() : [];
+    const authoritative = list.filter(record => record?.recordType === 'return' && record?.authoritativeReturnCapture);
+    if (authoritative.length !== 1 || !hint?.returnItemId) return list;
+    const target = authoritative[0];
+    const enriched = {
+      ...target,
+      returnToken: hint.returnToken || target.returnToken || null,
+      returnItemId: hint.returnItemId,
+      returnContractId: hint.returnContractId || target.returnContractId || null,
+      returnRmaId: hint.returnRmaId || target.returnRmaId || null
+    };
+    enriched.recordId = parser.makeRecordId(enriched);
+    return list.map(record => record === target ? enriched : record);
+  }
+
   async function announceDiscovery(result) {
     if (!result?.detailLinks?.length && !result?.returnLinks?.length && !result?.historyPageLinks?.length) return;
     try {
@@ -258,7 +275,16 @@
           }
           await new Promise(resolve => setTimeout(resolve, randomBetween(700, 1600)));
         }
-        return scanPage({ force: true, notify: false, discover: false, reportChange: false });
+        const scanned = await scanPage({ force: true, notify: false, discover: false, reportChange: false });
+        if (message.job?.type === 'return' && scanned?.ok) {
+          const stabilizedRecords = applySingleReturnIdentityHint(scanned.records || [], message.job);
+          if (stabilizedRecords.some((record, index) => record?.recordId !== scanned.records?.[index]?.recordId)) {
+            const stabilizedReturns = stabilizedRecords.filter(record => record?.recordType === 'return' && record?.authoritativeReturnCapture);
+            const stabilizedSave = stabilizedReturns.length ? await storage.upsertRecords(stabilizedReturns) : scanned.save;
+            return { ...scanned, records: stabilizedRecords, save: stabilizedSave };
+          }
+        }
+        return scanned;
       })().then(sendResponse);
       return true;
     }
@@ -326,7 +352,8 @@
             const returnDoc = new DOMParser().parseFromString(returnHtml, 'text/html');
             const returnFinalUrl = returnResponse.url || returnUrl.toString();
             const returnParsed = parser.parseDocument(returnDoc, returnFinalUrl);
-            const returnRecords = (returnParsed.records || []).filter(record => record?.recordType === 'return' && record?.orderId === orderId && record?.authoritativeReturnCapture);
+            let returnRecords = (returnParsed.records || []).filter(record => record?.recordType === 'return' && record?.orderId === orderId && record?.authoritativeReturnCapture);
+            returnRecords = applySingleReturnIdentityHint(returnRecords, link).filter(record => record?.recordType === 'return' && record?.authoritativeReturnCapture);
             if (!returnRecords.length) return { ok: false, error: `Return status for ${orderId} did not contain an authoritative return record.` };
             const returnSave = await storage.upsertRecords(returnRecords);
             returnRefreshes.push({ url: returnFinalUrl, records: returnRecords.length, save: returnSave });

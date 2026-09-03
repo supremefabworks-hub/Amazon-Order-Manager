@@ -52,6 +52,16 @@
     return null;
   }
 
+  function findOrderRefundTotal(text) {
+    // Canonical order-level refund money comes only from a standalone Amazon Order Details
+    // "Refund Total" label. Generic refund lifecycle prose must never become this field.
+    const normalized = normalizeText(text);
+    const match = normalized.match(/(?:^|\n)\s*Refund Total\s*:?\s*\$\s*([0-9,]+(?:\.\d{2})?)\s*(?:$|\n)/im);
+    if (!match) return null;
+    const value = Number(match[1].replace(/,/g, ''));
+    return Number.isFinite(value) ? value : null;
+  }
+
   function findRefundAmount(text) {
     const direct = findLabeledMoney(text, [
       'Total refund', 'Total estimated refund*', 'Total estimated refund', 'Estimated refund', 'Refund amount', 'Refund total', 'Refund subtotal'
@@ -684,7 +694,9 @@
         returnRmaId: meta.returnRmaId,
         itemNames: evidence.itemNames,
         asins: evidence.asins,
-        itemIdentitySource: (evidence.itemNames.length || evidence.asins.length) ? 'order-detail-return-link' : null
+        itemIdentitySource: (evidence.itemNames.length || evidence.asins.length)
+          ? (isOrderDetailPage(baseUrl) ? 'order-detail-return-link' : 'return-link')
+          : null
       });
     }
     return results;
@@ -1133,7 +1145,8 @@
         // Order Details' Refund Total is the canonical order-level refund figure. Keep it separate
         // from child-return amounts so the dashboard can never inflate the order by summing
         // duplicated return-page totals.
-        record.canonicalRefundTotal = Number.isFinite(Number(record.refundAmount)) ? Number(record.refundAmount) : null;
+        const canonicalRefundTotal = findOrderRefundTotal(context);
+        record.canonicalRefundTotal = canonicalRefundTotal != null && Number.isFinite(Number(canonicalRefundTotal)) ? Number(canonicalRefundTotal) : null;
       }
 
       if (pageType === 'return') {
@@ -1286,6 +1299,7 @@
     findLabeledMoney,
     findOrderTotal,
     findRefundAmount,
+    findOrderRefundTotal,
     findCardLast4,
     extractPaymentEvidenceText,
     extractReturnItemEntries,

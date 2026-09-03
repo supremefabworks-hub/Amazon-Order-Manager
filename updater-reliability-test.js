@@ -11,4 +11,5 @@ assert(popup.includes('Check development update now') && popup.includes('ARL_CHE
 assert(popup.includes('ARL_GET_DEV_UPDATE_STATUS'), 'popup must expose persisted updater status');
 assert(host.includes('updater.log') && host.includes('--self-test'), 'native host must provide file logging and a local self-test');
 assert(installer.includes('DiagnoseOnly') && installer.includes('Show-Diagnostics'), 'installer must expose a diagnostics-only mode');
+assert(!installer.includes('??'), 'Windows PowerShell 5.1 installer must not use the PowerShell 7 null-coalescing operator');
 console.log('updater reliability tests passed');

@@ -954,7 +954,13 @@ async function forceRefreshOrder(orderId) {
     }
     for (const link of uniqueReturnLinks.values()) {
       await navigateExistingWorkerTab(tabId, link.url);
-      const returnResult = await scanWorkerTab(tabId, { type: 'return', manualRefresh: true, orderId: id, url: link.url });
+      const returnResult = await scanWorkerTab(tabId, {
+        type: 'return', manualRefresh: true, orderId: id, url: link.url,
+        returnToken: link.returnToken || null,
+        returnItemId: link.returnItemId || null,
+        returnContractId: link.returnContractId || null,
+        returnRmaId: link.returnRmaId || null
+      });
       const matched = (returnResult.records || []).some(r =>
         r?.recordType === 'return' && r?.orderId === id && r?.authoritativeReturnCapture &&
         (!link.returnToken || r.returnToken === link.returnToken) &&

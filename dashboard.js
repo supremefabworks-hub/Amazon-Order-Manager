@@ -142,7 +142,7 @@
       const orderItemNames = uniqueStrings(order?.itemNames || []);
       const returnedItemNames = uniqueStrings(returnRecords.flatMap(r => r.itemNames || []));
       const childRefundAmount = returnGroups.reduce((total, group) => total + (Number.isFinite(Number(group.amount)) ? Number(group.amount) : 0), 0);
-      const canonicalRefundCandidate = order?.canonicalRefundTotal ?? (order?.detailScanComplete ? order?.refundAmount : null);
+      const canonicalRefundCandidate = order?.canonicalRefundTotal;
       const canonicalRefundTotal = Number.isFinite(Number(canonicalRefundCandidate)) ? Number(canonicalRefundCandidate) : null;
       const refundAmount = canonicalRefundTotal != null ? canonicalRefundTotal : (returnGroups.some(g => Number.isFinite(Number(g.amount))) ? childRefundAmount : null);
       const refundAmountMismatch = canonicalRefundTotal != null && childRefundAmount > canonicalRefundTotal + 0.011;

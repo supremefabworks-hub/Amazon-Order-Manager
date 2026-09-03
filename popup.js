@@ -45,7 +45,8 @@
       const total = Number(order?.purchaseAmount); if (Number.isFinite(total)) allTotal += total;
       if (rs.length) {
         returnCount += 1;
-        const canonical = Number(order?.canonicalRefundTotal ?? (order?.detailScanComplete ? order?.refundAmount : null));
+        const canonicalRaw = order?.canonicalRefundTotal;
+        const canonical = canonicalRaw == null ? NaN : Number(canonicalRaw);
         returnTotal += Number.isFinite(canonical) ? canonical : refundTotal(rs);
         const reconciled = rs.some(r => r.manualState === 'reconciled');
         const flagged = reconciled ? [] : rs.filter(r => storage.needsCreditReview(r));
