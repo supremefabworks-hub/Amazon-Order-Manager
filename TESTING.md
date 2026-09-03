@@ -2,9 +2,14 @@
 
 ## Current test target
 
-**v0.17.0** is the current source baseline and user-testable candidate.
+**v0.18.0** is the current source baseline after release merge. It preserves the v0.17 Amazon crawler/return contract and adds the verified local development auto-update channel.
 
-Automated regression coverage must pass before packaging. Live Amazon Business validation is still required because account-specific Amazon markup, pagination controls, and return pages cannot be fully proven from repository fixtures.
+Two independent live boundaries remain:
+
+- Issue #7: live Amazon Business acceptance of crawler/details/returns/UI behavior.
+- Issue #10: live Windows bootstrap plus one subsequent automatic development update.
+
+Automated regression coverage must pass before packaging or merging.
 
 ## Automated checks
 
@@ -23,6 +28,8 @@ node background-test.js
 node state-machine-test.js
 node reconciliation-test.js
 node ui-test.js
+node dev-updater-test.js
+node release-test.js
 ```
 
 Required automated coverage includes:
@@ -39,20 +46,92 @@ Required automated coverage includes:
 - bundled/multi-item returns can produce separate item-level records and expected refund values,
 - authoritative return capture replaces provisional bundled-item contamination,
 - payment last-four parsing is restricted to payment-method/payment-information evidence,
-- manifest version change wipes development ledger/crawl state, including v0.16 -> v0.17 where no prior version key exists,
+- manifest version change wipes development ledger/crawl state,
 - dashboard has fixed `Details / Credit / Reset / Refresh` actions and no horizontal order scrolling,
-- bank reconciliation bridge remains narrow and version-aligned.
+- bank reconciliation bridge remains narrow,
+- manifest/package versions stay identical,
+- the development manifest key resolves to fixed extension ID `hhmimkpolikhncnbkkbbabbopbccabcf`,
+- native updater host/origin/protocol constants remain consistent,
+- the extension reloads only after a strictly newer successful native-host install result,
+- missing/invalid native-host responses fail closed without disrupting the extension,
+- CI emits the extension ZIP, SHA-256 sidecar, one-time Windows updater package, and versioned development-release contract.
 
-## Required live Amazon Business validation
+## Development auto-update live validation — Issue #10
 
-Load the unpacked v0.17.0 extension in Chrome and perform this acceptance pass against the real Amazon Business account.
+The Windows native host cannot be fully validated by Linux GitHub Actions. Complete this on the actual Windows test PC after v0.18.0 is merged and `dev-v0.18.0` exists.
+
+### A. Verify the release
+
+1. Confirm GitHub Actions for the v0.18.0 `main` commit is green.
+2. Confirm prerelease `dev-v0.18.0` exists.
+3. Confirm it contains:
+   - `amazon-order-manager.zip`
+   - `amazon-order-manager.zip.sha256`
+   - `amazon-order-manager-dev-updater.zip`
+4. Do not install a package if the release is missing the checksum sidecar.
+
+### B. One-time Windows bootstrap
+
+1. Download and extract `amazon-order-manager-dev-updater.zip`.
+2. Open PowerShell in that extracted directory.
+3. Run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
+```
+
+4. Confirm the installer exits successfully and prints:
+
+```text
+Extension ID: hhmimkpolikhncnbkkbbabbopbccabcf
+```
+
+5. Confirm this directory exists and contains `manifest.json`:
+
+```text
+%LOCALAPPDATA%\SupremeFabWorks\AmazonOrderManagerDev\current
+```
+
+6. Open `chrome://extensions`, enable Developer mode, remove the old unpacked Amazon Order Manager copy, click **Load unpacked**, and select that exact `current` directory.
+7. Confirm Chrome reports extension ID `hhmimkpolikhncnbkkbbabbopbccabcf` and version `0.18.0`.
+8. Confirm the normal popup/dashboard loads.
+9. Because active development resets data on a version change, confirm the test ledger/crawl state starts clean as expected.
+10. Confirm no Amazon credentials, cookies, bank credentials, or financial-provider tokens were requested by the installer/native host.
+
+### C. Native host fail-safe check
+
+After v0.18.0 is loaded:
+
+1. Confirm normal Amazon extension operation is unaffected while no update is available.
+2. Allow at least one update check or invoke the documented manual update-check message from development diagnostics if needed.
+3. Confirm no page navigation or crawl job is created merely by the updater alarm.
+4. If GitHub/network access is temporarily unavailable, confirm the current extension continues to run and does not reload.
+
+### D. Prove a real automatic update
+
+A second, higher version is required to prove the end-to-end update path.
+
+1. Make the next user-testable revision with both manifest/package versions strictly greater than `0.18.0`.
+2. Merge only after PR CI passes.
+3. Confirm main CI publishes `dev-v<new version>` with ZIP + SHA-256 sidecar.
+4. Leave Chrome running with the unpacked `current` folder loaded; do not manually copy/reload files.
+5. At Chrome startup or within the 15-minute check interval, confirm the updater installs the newer verified package.
+6. Confirm Chrome reloads the extension automatically.
+7. Confirm `chrome://extensions` and the extension UI show the new version.
+8. Confirm `%LOCALAPPDATA%\SupremeFabWorks\AmazonOrderManagerDev\previous` contains the prior successful build.
+9. Confirm normal dashboard and Amazon behavior still work after reload.
+
+Issue #10 stays open until A-D pass on the Windows test PC.
+
+## Required live Amazon Business validation — Issue #7
+
+Perform this acceptance pass against the real Amazon Business account. v0.18 must behave identically to the v0.17 authoritative Amazon contract.
 
 ### Clean start
 
-1. Confirm `chrome://extensions` shows version `0.17.0`.
-2. Reload/update the extension from v0.16 or earlier.
-3. Confirm the development reset starts with a clean ledger/crawl state.
-4. Keep Amazon Business signed in normally. Do not provide credentials to the extension or repository.
+1. Confirm `chrome://extensions` shows the current v0.18+ development version.
+2. Confirm the development version reset started with a clean ledger/crawl state for this build.
+3. Keep Amazon Business signed in normally. Do not provide credentials to the extension or repository.
 
 ### Strict crawl sequence
 
@@ -63,7 +142,7 @@ Load the unpacked v0.17.0 extension in Chrome and perform this acceptance pass a
 5. Confirm `Detailed` appears only after successful canonical capture.
 6. Confirm the crawler activates Amazon's real page-2 control or taught Business pager route.
 7. Confirm page 2 counts as progress only after its visible Order-ID fingerprint differs from page 1.
-8. Repeat through page 3 and every remaining page in that year.
+8. Repeat through every remaining page in that year.
 9. Confirm the crawler does not switch to an older year while an enabled next-page control exists.
 10. On the final page of the year, confirm it switches to the next older year only after no valid next page remains.
 11. Confirm overlapping orders between pages are counted as overlap evidence and are not duplicated in the ledger.
@@ -82,13 +161,7 @@ For a sample of ordinary and bundled orders:
 
 ### Return detection and lifecycle
 
-Use at least:
-
-- one ordinary non-returned order that offers `Return or replace items`,
-- one in-progress return,
-- one return where Amazon states a refund was issued,
-- one bundled/multi-item order with a partial return if available,
-- one Amazon Order ID with multiple separate returns if available.
+Use at least one ordinary non-returned order that offers `Return or replace items`, one in-progress return, one issued refund, one bundled partial return if available, and one Order ID with multiple returns if available.
 
 Verify:
 
@@ -103,13 +176,13 @@ Verify:
 
 ### Per-order Refresh
 
-For an order with a known return and an ordinary order:
+For a returned order and an ordinary order:
 
 1. Click `Refresh`.
 2. Confirm Chrome opens an inactive/background Amazon Order Details tab rather than navigating the active dashboard tab.
 3. Confirm the canonical detail capture refreshes.
 4. For the returned order, confirm a real `/spr/returns/prep` page is followed for that same order when Amazon exposes it.
-5. Confirm the return status/expected refund updates from the refreshed evidence.
+5. Confirm the return status/expected refund updates from refreshed evidence.
 6. Confirm the temporary background tab closes after completion.
 7. Confirm Refresh refuses to invent a URL if the order has no real stored Order Details URL.
 
@@ -119,7 +192,7 @@ For an order with a known return and an ordinary order:
 2. Verify every row uses the same fixed grid regardless of status.
 3. Verify all rows show the same four action positions: `Details`, `Credit`, `Reset`, `Refresh`.
 4. Verify inapplicable actions are disabled rather than removed.
-5. Verify the order containers are not horizontally scrollable at normal desktop widths.
+5. Verify order containers are not horizontally scrollable at normal desktop widths.
 6. Verify Needs Review total equals the sum of expected refund amounts for the currently flagged return records.
 
 ### Bank bridge privacy boundary
@@ -131,4 +204,4 @@ For an order with a known return and an ordinary order:
 
 ## Release decision
 
-v0.17.0 may be merged and packaged after automated tests pass. Issue #7 should remain open until the live Amazon Business acceptance checklist above is completed or any live defects found during it are fixed and regression-tested.
+A user-testable development build may merge only after `npm test` and PR CI pass. Every such build requires a strictly newer manifest/package version. Issue #7 remains open until live Amazon Business acceptance passes. Issue #10 remains open until the Windows bootstrap and a later real automatic update both pass.
