@@ -1,21 +1,20 @@
 name: Recover verified v0.16 source
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/recover-v016-source.yml'
+  pull_request:
 
 permissions:
   contents: write
 
 jobs:
   recover:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
       - name: Reconstruct and verify archived baseline
         shell: bash
         run: |
@@ -42,7 +41,7 @@ jobs:
           done
           printf 'Verified archive SHA-256: '
           sha256sum /tmp/amazon-refund-ledger-v0.16.0.zip
-      - name: Commit recovered editable source
+      - name: Commit recovered editable source to PR branch
         shell: bash
         run: |
           set -euo pipefail
@@ -53,5 +52,5 @@ jobs:
             echo 'Root source already matches recovered v0.16.0 baseline.'
           else
             git commit -m 'Restore verified v0.16.0 source baseline'
-            git push origin HEAD:main
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
           fi
