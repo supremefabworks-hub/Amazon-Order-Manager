@@ -21,7 +21,7 @@
   function esc(value) {
     return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
   }
-  function money(value) { return Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '—'; }
+  function money(value) { if (value === null || value === undefined || value === '') return '—'; return Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '—'; }
   function formatDate(value) {
     if (!value) return '—';
     const d = new Date(value);
@@ -66,8 +66,10 @@
     const ordered = (records || []).slice().sort((a,b) => String(b.lastScannedAt || '').localeCompare(String(a.lastScannedAt || '')));
     const explicitGroupValues = [];
     for (const r of ordered) {
-      const groupValue = Number(r.returnGroupRefundAmount);
-      const scopedValue = r.refundAmountScope === 'return' ? Number(r.refundAmount ?? r.refundSubtotal) : NaN;
+      const groupRaw = r.returnGroupRefundAmount;
+      const scopedRaw = r.refundAmountScope === 'return' ? (r.refundAmount ?? r.refundSubtotal) : null;
+      const groupValue = groupRaw === null || groupRaw === undefined || groupRaw === '' ? NaN : Number(groupRaw);
+      const scopedValue = scopedRaw === null || scopedRaw === undefined || scopedRaw === '' ? NaN : Number(scopedRaw);
       const value = Number.isFinite(groupValue) ? groupValue : scopedValue;
       if (Number.isFinite(value)) explicitGroupValues.push(value);
     }
@@ -77,13 +79,17 @@
     }
     const itemValues = new Map();
     for (const r of ordered) {
-      const value = Number(r.refundAmount ?? r.refundSubtotal);
+      const raw = r.refundAmount ?? r.refundSubtotal;
+      const value = raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
       if (!Number.isFinite(value)) continue;
       if (r.refundAmountScope === 'item') itemValues.set(returnRecordIdentity(r), value);
     }
     if (itemValues.size) return { amount: Array.from(itemValues.values()).reduce((a,b)=>a+b,0), conflict: false };
     // Legacy records did not mark scope. Treat one amount per return group, never once per child.
-    const legacy = ordered.map(r => Number(r.refundAmount ?? r.refundSubtotal)).find(Number.isFinite);
+    const legacy = ordered.map(r => {
+      const raw = r.refundAmount ?? r.refundSubtotal;
+      return raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
+    }).find(Number.isFinite);
     return { amount: Number.isFinite(legacy) ? legacy : null, conflict: false };
   }
   function groupReturnRecords(records) {
@@ -143,7 +149,9 @@
       const returnedItemNames = uniqueStrings(returnRecords.flatMap(r => r.itemNames || []));
       const childRefundAmount = returnGroups.reduce((total, group) => total + (Number.isFinite(Number(group.amount)) ? Number(group.amount) : 0), 0);
       const canonicalRefundCandidate = order?.canonicalRefundTotal;
-      const canonicalRefundTotal = Number.isFinite(Number(canonicalRefundCandidate)) ? Number(canonicalRefundCandidate) : null;
+      const canonicalRefundTotal = canonicalRefundCandidate !== null && canonicalRefundCandidate !== undefined && canonicalRefundCandidate !== '' && Number.isFinite(Number(canonicalRefundCandidate))
+        ? Number(canonicalRefundCandidate)
+        : null;
       const refundAmount = canonicalRefundTotal != null ? canonicalRefundTotal : (returnGroups.some(g => Number.isFinite(Number(g.amount))) ? childRefundAmount : null);
       const refundAmountMismatch = canonicalRefundTotal != null && childRefundAmount > canonicalRefundTotal + 0.011;
       const itemIdentityConflict = returnGroups.some(group => group.itemIdentityConflict);
@@ -251,7 +259,12 @@
     return groupReturnRecords(dedupeReturns(records || [])).reduce((total, group) => total + (Number.isFinite(Number(group.amount)) ? Number(group.amount) : 0), 0);
   }
   function needsReviewExpectedAmount(row) {
-    return returnRecordAmountTotal((row.returns || []).filter(r => storage.needsCreditReview(r)));
+    const recordTotal = returnRecordAmountTotal((row.returns || []).filter(r => storage.needsCreditReview(r)));
+    if (row.refundAmountMismatch || row.itemIdentityConflict || row.groupAmountConflict) {
+      const orderExpected = row.refundAmount;
+      if (orderExpected !== null && orderExpected !== undefined && orderExpected !== '' && Number.isFinite(Number(orderExpected))) return Number(orderExpected);
+    }
+    return recordTotal;
   }
 
   function renderStats() {
@@ -456,7 +469,7 @@
       schema: 'amazon-refund-credit-check-request/v1',
       requestId,
       generatedAt: new Date().toISOString(),
-      sourceExtensionVersion: '0.17.0',
+      sourceExtensionVersion: chrome.runtime.getManifest()?.version || null,
       privacy: 'Contains Amazon Order IDs, refund amounts, dates, item titles, and card last four only. No bank credentials or financial-provider tokens.',
       matchingPolicy: {
         amountTolerance: 0.01,

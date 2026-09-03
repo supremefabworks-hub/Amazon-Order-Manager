@@ -176,16 +176,26 @@
     return out;
   }
 
-  function trustedReturnIdentityShouldWin(existing, incoming) {
-    if (existing?.recordType !== 'return' || incoming?.recordType !== 'return') return false;
-    if (existing.itemIdentitySource !== 'order-detail-return-link') return false;
-    if (!existing.returnItemId || !incoming.returnItemId || existing.returnItemId !== incoming.returnItemId) return false;
+  function trustedReturnIdentityDecision(existing, incoming) {
+    const none = { bound: false, preserve: false, conflict: false };
+    if (existing?.recordType !== 'return' || incoming?.recordType !== 'return') return none;
+    if (existing.itemIdentitySource !== 'order-detail-return-link') return none;
+    if (!existing.returnItemId || !incoming.returnItemId || existing.returnItemId !== incoming.returnItemId) return none;
+
     const existingAsins = new Set((existing.asins || []).map(value => String(value || '').toUpperCase()).filter(Boolean));
     const incomingAsins = new Set((incoming.asins || []).map(value => String(value || '').toUpperCase()).filter(Boolean));
-    if (!existingAsins.size) return false;
-    if (!incomingAsins.size) return true;
-    for (const asin of existingAsins) if (incomingAsins.has(asin)) return false;
-    return true;
+    const existingNames = new Set((existing.itemNames || []).map(value => String(value || '').trim().toLowerCase()).filter(Boolean));
+    const incomingNames = new Set((incoming.itemNames || []).map(value => String(value || '').trim().toLowerCase()).filter(Boolean));
+
+    if (incomingAsins.size) {
+      for (const asin of existingAsins) if (incomingAsins.has(asin)) return { bound: true, preserve: false, conflict: false };
+      if (existingAsins.size) return { bound: true, preserve: true, conflict: true };
+    }
+    if (incomingNames.size) {
+      for (const name of existingNames) if (incomingNames.has(name)) return { bound: true, preserve: true, conflict: false };
+      if (existingNames.size) return { bound: true, preserve: true, conflict: true };
+    }
+    return { bound: true, preserve: true, conflict: false };
   }
 
   function mergeRecord(existing, incoming, scannedAt) {
@@ -195,25 +205,26 @@
     const wouldRegressReturn = existing?.recordType === 'return' && incoming?.recordType === 'return' && incomingStageRank < existingStageRank;
     const existingStatusRank = STATUS_RANK[existing?.status] ?? 0;
     const incomingStatusRank = STATUS_RANK[incoming?.status] ?? 0;
-    const preserveTrustedItemIdentity = trustedReturnIdentityShouldWin(existing, incoming);
+    const trustedIdentity = trustedReturnIdentityDecision(existing, incoming);
 
     for (const [key, value] of Object.entries(incoming)) {
       if (value === null || value === undefined || value === '') continue;
       if (wouldRegressReturn && ['returnStage', 'status', 'statusText'].includes(key)) continue;
       if (key === 'status' && incomingStatusRank < existingStatusRank) continue;
       if (Array.isArray(value)) {
-        if (preserveTrustedItemIdentity && ['itemNames', 'asins'].includes(key)) {
+        if (trustedIdentity.preserve && ['itemNames', 'asins'].includes(key)) {
           merged[key] = mergeArray([], existing?.[key] || []);
         } else if (incoming?.recordType === 'return' && incoming?.authoritativeReturnCapture && ['itemNames', 'asins'].includes(key)) merged[key] = mergeArray([], value);
         else merged[key] = mergeArray(existing?.[key], value);
       }
       else if (key === 'returnMilestones') merged[key] = mergeReturnMilestones(existing?.[key], value);
       else if (key === 'detailScanComplete') merged[key] = Boolean(existing?.[key] || value);
-      else if (preserveTrustedItemIdentity && key === 'itemIdentitySource') merged[key] = existing.itemIdentitySource;
+      else if (trustedIdentity.bound && key === 'itemIdentitySource') merged[key] = existing.itemIdentitySource;
       else merged[key] = value;
     }
 
-    if (preserveTrustedItemIdentity) {
+    if (trustedIdentity.bound) merged.itemIdentitySource = existing.itemIdentitySource;
+    if (trustedIdentity.conflict) {
       merged.itemIdentityConflict = true;
       merged.itemIdentityConflictIncoming = {
         itemNames: mergeArray([], incoming.itemNames || []),
