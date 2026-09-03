@@ -20,7 +20,7 @@ This chat is disposable. Do **not** rely on memory or assumptions from any previ
 
 ## Current baseline
 
-The complete root source baseline is **v0.18.0 after PR #11 merges**. The exact v0.16.0 package under `source-snapshots/v0.16.0/full/` is historical recovery/audit material only and must not replace the complete current root unless an intentional rollback is explicitly required.
+The complete root source baseline is **v0.18.1 after PR #12 merges**. The exact v0.16.0 package under `source-snapshots/v0.16.0/full/` is historical recovery/audit material only and must not replace the complete current root unless an intentional rollback is explicitly required.
 
 v0.18 preserves the v0.17 authoritative Amazon behavior and adds the verified Windows development auto-update channel.
 
@@ -72,6 +72,7 @@ Return records must be item-level for bundled orders: show the actual returned p
 Return lifecycle must be evidence-based. In-progress returns must not be labeled `Refund issued` without affirmative Amazon milestone evidence. Future credit dates are ETAs, not completed credits. Bank credit confirmation remains isolated through the narrow reconciliation bridge described in the repo.
 
 Payment-card last-four parsing must be scoped to actual payment-method/payment-information evidence. Never use arbitrary four-digit page text.
+v0.18.1 specifically rejects generic Amazon DOM `card` containers, gift-card values, and unrelated masked values; only direct recognized card/payment/refund-method evidence may populate last-four.
 
 The dashboard must stay compact, symmetric, systematic, and never use horizontally scrollable order containers. All rows use the same grid and fixed four actions: `Details`, `Credit`, `Reset`, `Refresh`. Inapplicable actions are disabled rather than removed.
 

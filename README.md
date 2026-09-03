@@ -2,7 +2,7 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.0.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.1 after PR #12 merges.** GitHub is the source of truth and chat sessions are disposable.
 
 Two issues remain intentionally separate:
 
@@ -72,7 +72,7 @@ The native updater, stable development ID policy, and destructive development ve
 
 ## Core v0.17/v0.18 product architecture
 
-v0.18 does not loosen the v0.17 Amazon data contract.
+v0.18.1 does not loosen the v0.17 Amazon data contract. It additionally hardens payment-card last-four capture so generic Amazon layout `card` containers, gift-card values, and unrelated masked numbers cannot become canonical card evidence.
 
 ### Canonical orders
 

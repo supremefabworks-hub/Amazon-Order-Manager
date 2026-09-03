@@ -2,7 +2,7 @@
 
 ## Current test target
 
-**v0.18.0** is the current source baseline after release merge. It preserves the v0.17 Amazon crawler/return contract and adds the verified local development auto-update channel.
+**v0.18.1** is the current source baseline after PR #12 release merge. It preserves the v0.17 Amazon crawler/return contract, retains the verified local development auto-update channel, and fixes the live false payment-card last-four contamination found in v0.18.0.
 
 Two independent live boundaries remain:
 
@@ -46,6 +46,8 @@ Required automated coverage includes:
 - bundled/multi-item returns can produce separate item-level records and expected refund values,
 - authoritative return capture replaces provisional bundled-item contamination,
 - payment last-four parsing is restricted to payment-method/payment-information evidence,
+- generic Amazon DOM `card` layout containers, gift-card values, and unrelated masked numbers cannot populate card last-four,
+- recognized card brands and direct masks under Payment/Refund method headings still parse correctly,
 - manifest version change wipes development ledger/crawl state,
 - dashboard has fixed `Details / Credit / Reset / Refresh` actions and no horizontal order scrolling,
 - bank reconciliation bridge remains narrow,
