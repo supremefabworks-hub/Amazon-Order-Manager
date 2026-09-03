@@ -947,11 +947,20 @@ async function forceRefreshOrder(orderId) {
     const complete = (detailResult.records || []).some(r => r?.recordType === 'order' && r?.orderId === id && r?.detailScanComplete);
     if (!complete) throw new Error('Rendered Order Details did not produce a complete canonical capture.');
     let returnsRefreshed = 0;
+    const uniqueReturnLinks = new Map();
     for (const link of (detailResult.returnLinks || []).filter(link => link?.orderId === id && link?.url && /\/spr\/returns\/prep/i.test(link.url))) {
+      const key = `${link.returnToken || link.url}:${link.returnItemId || ''}`;
+      if (!uniqueReturnLinks.has(key)) uniqueReturnLinks.set(key, link);
+    }
+    for (const link of uniqueReturnLinks.values()) {
       await navigateExistingWorkerTab(tabId, link.url);
       const returnResult = await scanWorkerTab(tabId, { type: 'return', manualRefresh: true, orderId: id, url: link.url });
-      const matched = (returnResult.records || []).some(r => r?.recordType === 'return' && r?.orderId === id && r?.authoritativeReturnCapture);
-      if (!matched) throw new Error('Amazon return-status page did not produce an authoritative return record.');
+      const matched = (returnResult.records || []).some(r =>
+        r?.recordType === 'return' && r?.orderId === id && r?.authoritativeReturnCapture &&
+        (!link.returnToken || r.returnToken === link.returnToken) &&
+        (!link.returnItemId || !r.returnItemId || r.returnItemId === link.returnItemId)
+      );
+      if (!matched) throw new Error('Amazon return-status page did not produce the expected authoritative return child.');
       returnsRefreshed += 1;
     }
     return { ok: true, orderId: id, detailScannedAt: nowIso(), returnsRefreshed };

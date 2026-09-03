@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'SupremeFabWorks\AmazonOrderManagerDev')
+    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'SupremeFabWorks\AmazonOrderManagerDev'),
+    [switch]$DiagnoseOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,7 +12,9 @@ if ($PSVersionTable.PSEdition -ne 'Desktop') {
     if (-not (Test-Path $windowsPowerShell)) {
         throw 'Windows PowerShell 5.1 is required to compile the native updater host.'
     }
-    & $windowsPowerShell -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -InstallRoot $InstallRoot
+    $forward = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-InstallRoot',$InstallRoot)
+    if ($DiagnoseOnly) { $forward += '-DiagnoseOnly' }
+    & $windowsPowerShell @forward
     exit $LASTEXITCODE
 }
 
@@ -30,6 +33,40 @@ $HostExe = Join-Path $HostDirectory 'AmazonOrderManagerDevUpdaterHost.exe'
 $HostManifest = Join-Path $HostDirectory "$HostName.json"
 $CurrentDirectory = Join-Path $InstallRoot 'current'
 $PreviousDirectory = Join-Path $InstallRoot 'previous'
+
+function Show-Diagnostics {
+    Write-Host ''
+    Write-Host 'Amazon Order Manager development updater diagnostics' -ForegroundColor Cyan
+    Write-Host "Install root: $InstallRoot"
+    Write-Host "Host executable: $HostExe"
+    Write-Host "Host manifest: $HostManifest"
+    Write-Host "Current extension: $CurrentDirectory"
+    $registryPath = "Registry::HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\$HostName"
+    $registered = $null
+    try {
+        $key = Get-Item -LiteralPath $registryPath -ErrorAction Stop
+        $registered = $key.GetValue('')
+    } catch {}
+    Write-Host "Registry manifest: $($registered ?? '(missing)')"
+    $currentManifest = Join-Path $CurrentDirectory 'manifest.json'
+    if (Test-Path $currentManifest) {
+        try {
+            $currentVersion = (Get-Content -Raw -Path $currentManifest | ConvertFrom-Json).version
+            Write-Host "Current files version: $currentVersion"
+        } catch { Write-Host 'Current manifest: invalid' -ForegroundColor Yellow }
+    } else { Write-Host 'Current manifest: missing' -ForegroundColor Yellow }
+    if (Test-Path $HostExe) {
+        & $HostExe --self-test
+        if ($LASTEXITCODE -ne 0) { Write-Host "Native host self-test failed with exit code $LASTEXITCODE" -ForegroundColor Yellow }
+    } else { Write-Host 'Native host executable is missing.' -ForegroundColor Yellow }
+    $logPath = Join-Path $InstallRoot 'updater.log'
+    Write-Host "Updater log: $logPath"
+    if (Test-Path $logPath) {
+        Write-Host 'Last updater log lines:'
+        Get-Content -Path $logPath -Tail 12
+    }
+    Write-Host ''
+}
 
 function Write-Utf8NoBom([string]$Path, [string]$Content) {
     $utf8 = New-Object System.Text.UTF8Encoding($false)
@@ -116,6 +153,8 @@ function Install-ExtensionPackage([string]$PackageRoot, [Version]$ExpectedVersio
     }
 }
 
+if ($DiagnoseOnly) { Show-Diagnostics; exit 0 }
+
 if (-not (Test-Path $NativeSource)) {
     throw "NativeHost.cs was not found next to this installer: $NativeSource"
 }
@@ -187,4 +226,7 @@ Write-Host "Extension ID: $ExtensionId"
 Write-Host "Load unpacked folder once: $CurrentDirectory"
 Write-Host ''
 Write-Host 'If an older unpacked copy is currently loaded, remove that old copy from chrome://extensions and load the folder above once.'
-Write-Host 'After that, merged versioned dev releases are checked automatically at Chrome startup and every 15 minutes.'
+Write-Host 'After that, merged versioned dev releases are checked on worker startup, Chrome startup, manually from the popup, and every 15 minutes.'
+Write-Host "Updater log: $(Join-Path $InstallRoot 'updater.log')"
+Write-Host ''
+Show-Diagnostics

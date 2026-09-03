@@ -5,7 +5,8 @@ const DEV_UPDATE_PROTOCOL = 'arl-dev-updater-v1';
 const DEV_UPDATE_ALARM_NAME = 'arl-dev-auto-update';
 const DEV_UPDATE_STATUS_KEY = 'devUpdateStatus';
 const DEV_UPDATE_PERIOD_MINUTES = 15;
-const DEV_UPDATE_INITIAL_DELAY_MINUTES = 1;
+const DEV_UPDATE_INITIAL_DELAY_MINUTES = 0.5;
+const DEV_UPDATE_BOOT_THROTTLE_MS = 5 * 60 * 1000;
 const DEV_AUTO_UPDATE_ENABLED = true;
 
 let devUpdateCheckInFlight = null;
@@ -30,10 +31,16 @@ function compareExtensionVersions(a, b) {
   return 0;
 }
 
+async function readDevUpdateStatus() {
+  try {
+    const data = await chrome.storage.local.get([DEV_UPDATE_STATUS_KEY]);
+    return data?.[DEV_UPDATE_STATUS_KEY] || null;
+  } catch (_) { return null; }
+}
+
 async function writeDevUpdateStatus(status) {
   try {
-    const prior = await chrome.storage.local.get([DEV_UPDATE_STATUS_KEY]);
-    const previous = prior?.[DEV_UPDATE_STATUS_KEY] || {};
+    const previous = await readDevUpdateStatus() || {};
     await chrome.storage.local.set({
       [DEV_UPDATE_STATUS_KEY]: {
         ...previous,
@@ -44,14 +51,30 @@ async function writeDevUpdateStatus(status) {
   } catch (_) {}
 }
 
-function scheduleDevUpdateAlarm() {
-  if (!DEV_AUTO_UPDATE_ENABLED) return;
+async function ensureDevUpdateAlarm() {
+  if (!DEV_AUTO_UPDATE_ENABLED) return { ok: true, enabled: false };
   try {
-    chrome.alarms.create(DEV_UPDATE_ALARM_NAME, {
-      delayInMinutes: DEV_UPDATE_INITIAL_DELAY_MINUTES,
-      periodInMinutes: DEV_UPDATE_PERIOD_MINUTES
-    });
-  } catch (_) {}
+    let existing = null;
+    try { existing = await chrome.alarms.get(DEV_UPDATE_ALARM_NAME); } catch (_) {}
+    if (!existing || Number(existing.periodInMinutes) !== DEV_UPDATE_PERIOD_MINUTES) {
+      const options = {
+        delayInMinutes: DEV_UPDATE_INITIAL_DELAY_MINUTES,
+        periodInMinutes: DEV_UPDATE_PERIOD_MINUTES,
+        persistAcrossSessions: true
+      };
+      try {
+        await chrome.alarms.create(DEV_UPDATE_ALARM_NAME, options);
+      } catch (_) {
+        delete options.persistAcrossSessions;
+        await chrome.alarms.create(DEV_UPDATE_ALARM_NAME, options);
+      }
+    }
+    return { ok: true, enabled: true };
+  } catch (error) {
+    const message = error?.message || String(error);
+    await writeDevUpdateStatus({ alarmOk: false, error: `Update alarm: ${message}` });
+    return { ok: false, error: message };
+  }
 }
 
 async function performDevUpdateCheck(reason = 'scheduled') {
@@ -61,6 +84,15 @@ async function performDevUpdateCheck(reason = 'scheduled') {
   if (!currentVersion || !extensionVersionParts(currentVersion)) {
     return { ok: false, updated: false, error: 'Current extension version is invalid.' };
   }
+
+  await writeDevUpdateStatus({
+    ok: null,
+    checking: true,
+    reason,
+    currentVersion,
+    lastCheckStartedAt: new Date().toISOString(),
+    error: null
+  });
 
   const request = {
     protocol: DEV_UPDATE_PROTOCOL,
@@ -77,46 +109,35 @@ async function performDevUpdateCheck(reason = 'scheduled') {
     const message = error?.message || String(error);
     await writeDevUpdateStatus({
       ok: false,
+      checking: false,
       hostAvailable: false,
       reason,
       currentVersion,
       error: message,
       lastCheckedAt: new Date().toISOString()
     });
-    return { ok: false, updated: false, hostAvailable: false, error: message };
+    return { ok: false, updated: false, hostAvailable: false, currentVersion, error: message };
   }
 
   if (!response || response.protocol !== DEV_UPDATE_PROTOCOL) {
     const error = 'Native updater returned an invalid protocol response.';
-    await writeDevUpdateStatus({
-      ok: false,
-      hostAvailable: true,
-      reason,
-      currentVersion,
-      error,
-      lastCheckedAt: new Date().toISOString()
-    });
-    return { ok: false, updated: false, hostAvailable: true, error };
+    await writeDevUpdateStatus({ ok: false, checking: false, hostAvailable: true, reason, currentVersion, error, lastCheckedAt: new Date().toISOString() });
+    return { ok: false, updated: false, hostAvailable: true, currentVersion, error };
   }
 
   if (response.ok !== true) {
     const error = response.error || 'Native updater reported an error.';
     await writeDevUpdateStatus({
-      ok: false,
-      hostAvailable: true,
-      reason,
-      currentVersion,
-      latestVersion: response.latestVersion || null,
-      error,
-      lastCheckedAt: new Date().toISOString()
+      ok: false, checking: false, hostAvailable: true, reason, currentVersion,
+      latestVersion: response.latestVersion || null, error, lastCheckedAt: new Date().toISOString()
     });
-    return { ok: false, updated: false, hostAvailable: true, error };
+    return { ok: false, updated: false, hostAvailable: true, currentVersion, latestVersion: response.latestVersion || null, error };
   }
 
   const installedVersion = response.installedVersion || response.latestVersion || null;
   const comparison = installedVersion ? compareExtensionVersions(installedVersion, currentVersion) : null;
   const shouldReload = response.updated === true && comparison === 1;
-
+  const now = new Date().toISOString();
   const result = {
     ok: true,
     updated: shouldReload,
@@ -129,16 +150,21 @@ async function performDevUpdateCheck(reason = 'scheduled') {
 
   await writeDevUpdateStatus({
     ...result,
+    checking: false,
     reason,
     error: null,
-    lastCheckedAt: new Date().toISOString(),
-    ...(shouldReload ? { lastInstalledAt: new Date().toISOString() } : {})
+    lastCheckedAt: now,
+    ...(shouldReload ? { lastInstalledAt: now, lastReloadRequestedAt: now } : {})
   });
 
+  // MV3 service workers may be suspended before a timer callback runs. Reload synchronously after
+  // the verified install instead of relying on a setTimeout that may never fire.
   if (shouldReload) {
-    setTimeout(() => {
-      try { chrome.runtime.reload(); } catch (_) {}
-    }, 150);
+    try { chrome.runtime.reload(); }
+    catch (error) {
+      await writeDevUpdateStatus({ ok: false, checking: false, error: `Reload failed: ${error?.message || error}` });
+      return { ...result, ok: false, updated: false, error: error?.message || String(error) };
+    }
   }
 
   return result;
@@ -151,33 +177,46 @@ function checkForDevUpdate(reason = 'scheduled') {
   return devUpdateCheckInFlight;
 }
 
+async function initializeDevUpdater(reason = 'worker-start', force = false) {
+  await ensureDevUpdateAlarm();
+  if (!force) {
+    const status = await readDevUpdateStatus();
+    const last = status?.lastCheckedAt ? new Date(status.lastCheckedAt).getTime() : 0;
+    if (Number.isFinite(last) && Date.now() - last < DEV_UPDATE_BOOT_THROTTLE_MS) {
+      return { ok: true, skipped: true, reason: 'recently-checked', currentVersion: chrome.runtime.getManifest()?.version || null };
+    }
+  }
+  return checkForDevUpdate(reason);
+}
+
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm?.name === DEV_UPDATE_ALARM_NAME) checkForDevUpdate('alarm').catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  scheduleDevUpdateAlarm();
-  checkForDevUpdate('startup').catch(() => {});
+  initializeDevUpdater('startup', true).catch(() => {});
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  scheduleDevUpdateAlarm();
+  ensureDevUpdateAlarm().catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'ARL_CHECK_DEV_UPDATE') {
-    checkForDevUpdate('manual')
+    initializeDevUpdater('manual', true)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ ok: false, updated: false, error: error?.message || String(error) }));
     return true;
   }
 
   if (message?.type === 'ARL_GET_DEV_UPDATE_STATUS') {
-    chrome.storage.local.get([DEV_UPDATE_STATUS_KEY])
-      .then(data => sendResponse({ ok: true, status: data?.[DEV_UPDATE_STATUS_KEY] || null }))
+    readDevUpdateStatus()
+      .then(status => sendResponse({ ok: true, status }))
       .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
 });
 
-scheduleDevUpdateAlarm();
+// Important update checks must exist whenever the MV3 worker starts. Chrome explicitly recommends
+// recreating important alarms at worker startup because alarm persistence can vary across versions.
+initializeDevUpdater('worker-start').catch(() => {});

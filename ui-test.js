@@ -14,4 +14,8 @@ assert(!background.includes('function syntheticDetailUrl'), 'background must not
 assert(css.includes('grid-template-columns: repeat(4, minmax(0, 1fr))'), 'actions must stay side-by-side in four fixed columns');
 assert(css.includes('min-height: 36px'), 'actions must use enlarged click targets');
 assert(css.includes('overflow-x: hidden'), 'ledger must continue forbidding horizontal order scrolling');
+assert(dashboard.includes('groupReturnRecords'), 'dashboard must group child return records by Amazon return token');
+assert(dashboard.includes('canonicalRefundTotal'), 'dashboard must prefer canonical Order Details Refund Total');
+assert(dashboard.includes('refundAmountMismatch'), 'dashboard must flag child-return totals that exceed canonical refund total');
+assert(dashboard.includes('Return ${index}'), 'dashboard must render distinct compact child return blocks');
 console.log('ui regression tests passed');

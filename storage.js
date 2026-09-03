@@ -123,6 +123,7 @@
 
   function needsCreditReview(record, now = new Date()) {
     if (!record || record.recordType !== 'return') return false;
+    if (record.itemIdentityConflict) return true;
     if (record.manualState === 'reconciled' || isCreditConfirmed(record)) return false;
     const rank = returnStageRank(record);
     if (rank < RETURN_STAGE_RANK.refund_issued) return true;
@@ -175,6 +176,18 @@
     return out;
   }
 
+  function trustedReturnIdentityShouldWin(existing, incoming) {
+    if (existing?.recordType !== 'return' || incoming?.recordType !== 'return') return false;
+    if (existing.itemIdentitySource !== 'order-detail-return-link') return false;
+    if (!existing.returnItemId || !incoming.returnItemId || existing.returnItemId !== incoming.returnItemId) return false;
+    const existingAsins = new Set((existing.asins || []).map(value => String(value || '').toUpperCase()).filter(Boolean));
+    const incomingAsins = new Set((incoming.asins || []).map(value => String(value || '').toUpperCase()).filter(Boolean));
+    if (!existingAsins.size) return false;
+    if (!incomingAsins.size) return true;
+    for (const asin of existingAsins) if (incomingAsins.has(asin)) return false;
+    return true;
+  }
+
   function mergeRecord(existing, incoming, scannedAt) {
     const merged = { ...existing };
     const existingStageRank = returnStageRank(existing);
@@ -182,18 +195,31 @@
     const wouldRegressReturn = existing?.recordType === 'return' && incoming?.recordType === 'return' && incomingStageRank < existingStageRank;
     const existingStatusRank = STATUS_RANK[existing?.status] ?? 0;
     const incomingStatusRank = STATUS_RANK[incoming?.status] ?? 0;
+    const preserveTrustedItemIdentity = trustedReturnIdentityShouldWin(existing, incoming);
 
     for (const [key, value] of Object.entries(incoming)) {
       if (value === null || value === undefined || value === '') continue;
       if (wouldRegressReturn && ['returnStage', 'status', 'statusText'].includes(key)) continue;
       if (key === 'status' && incomingStatusRank < existingStatusRank) continue;
       if (Array.isArray(value)) {
-        if (incoming?.recordType === 'return' && incoming?.authoritativeReturnCapture && ['itemNames', 'asins'].includes(key)) merged[key] = mergeArray([], value);
+        if (preserveTrustedItemIdentity && ['itemNames', 'asins'].includes(key)) {
+          merged[key] = mergeArray([], existing?.[key] || []);
+        } else if (incoming?.recordType === 'return' && incoming?.authoritativeReturnCapture && ['itemNames', 'asins'].includes(key)) merged[key] = mergeArray([], value);
         else merged[key] = mergeArray(existing?.[key], value);
       }
       else if (key === 'returnMilestones') merged[key] = mergeReturnMilestones(existing?.[key], value);
       else if (key === 'detailScanComplete') merged[key] = Boolean(existing?.[key] || value);
+      else if (preserveTrustedItemIdentity && key === 'itemIdentitySource') merged[key] = existing.itemIdentitySource;
       else merged[key] = value;
+    }
+
+    if (preserveTrustedItemIdentity) {
+      merged.itemIdentityConflict = true;
+      merged.itemIdentityConflictIncoming = {
+        itemNames: mergeArray([], incoming.itemNames || []),
+        asins: mergeArray([], incoming.asins || []),
+        source: incoming.itemIdentitySource || null
+      };
     }
 
     if (merged.recordType === 'return') {

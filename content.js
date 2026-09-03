@@ -139,7 +139,7 @@
     const byOrder = new Map();
     for (const record of returns) {
       if (!byOrder.has(record.orderId)) byOrder.set(record.orderId, new Map());
-      const key = record.returnToken || `${record.refundAmount ?? record.refundSubtotal ?? ''}:${(record.itemNames || []).join('|')}:${record.returnStage || ''}`;
+      const key = `${record.returnToken || record.returnStatusUrl || 'return'}:${record.returnItemId || record.asins?.[0] || record.itemNames?.[0] || record.recordId || 'item'}`;
       const bucket = byOrder.get(record.orderId);
       const prior = bucket.get(key);
       if (!prior || storage.returnStageRank(record) > storage.returnStageRank(prior) || String(record.lastScannedAt || '') > String(prior.lastScannedAt || '')) bucket.set(key, record);

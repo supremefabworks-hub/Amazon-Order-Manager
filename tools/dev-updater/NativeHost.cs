@@ -67,14 +67,38 @@ namespace SupremeFabWorks.AmazonOrderManagerDevUpdater
         private const string ChecksumAssetName = "amazon-order-manager.zip.sha256";
         private static readonly JavaScriptSerializer Serializer = new JavaScriptSerializer();
 
+        private static string InstallRootPath
+        {
+            get
+            {
+                DirectoryInfo hostDirectory = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
+                return hostDirectory.Parent != null ? hostDirectory.Parent.FullName : hostDirectory.FullName;
+            }
+        }
+
+        private static string LogPath { get { return Path.Combine(InstallRootPath, "updater.log"); } }
+
+        private static void Log(string message)
+        {
+            try
+            {
+                File.AppendAllText(LogPath, DateTime.UtcNow.ToString("o") + " " + (message ?? String.Empty) + Environment.NewLine, Encoding.UTF8);
+            }
+            catch { }
+        }
+
         public static int Main(string[] args)
         {
+            if (args != null && args.Length > 0 && String.Equals(args[0], "--self-test", StringComparison.OrdinalIgnoreCase))
+                return RunSelfTest();
+
             UpdateResponse response;
             try
             {
                 ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 
                 string callerOrigin = args != null && args.Length > 0 ? args[0] : null;
+                Log("native-message start origin=" + (callerOrigin ?? "(null)"));
                 if (!String.Equals(callerOrigin, ExpectedOrigin, StringComparison.Ordinal))
                     throw new InvalidOperationException("Caller origin is not authorized for this native host.");
 
@@ -85,10 +109,13 @@ namespace SupremeFabWorks.AmazonOrderManagerDevUpdater
                 if (!String.Equals(request.extensionId, ExpectedExtensionId, StringComparison.Ordinal))
                     throw new InvalidOperationException("Extension ID does not match the registered development build.");
 
+                Log("check request current=" + (request.currentVersion ?? "(null)") + " reason=" + (request.reason ?? "(null)"));
                 response = CheckForUpdate(request.currentVersion);
+                Log("check result status=" + (response.status ?? "(null)") + " latest=" + (response.latestVersion ?? "(null)") + " installed=" + (response.installedVersion ?? "(null)"));
             }
             catch (Exception ex)
             {
+                Log("native-message error=" + SafeError(ex));
                 response = new UpdateResponse
                 {
                     protocol = Protocol,
@@ -110,6 +137,34 @@ namespace SupremeFabWorks.AmazonOrderManagerDevUpdater
             }
         }
 
+        private static int RunSelfTest()
+        {
+            try
+            {
+                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+                string currentManifest = Path.Combine(InstallRootPath, "current", "manifest.json");
+                string currentVersion = "missing";
+                if (File.Exists(currentManifest))
+                {
+                    ManifestInfo manifest = Serializer.Deserialize<ManifestInfo>(File.ReadAllText(currentManifest, Encoding.UTF8));
+                    currentVersion = manifest != null && !String.IsNullOrWhiteSpace(manifest.version) ? manifest.version : "invalid";
+                }
+                ReleaseCandidate latest = FindLatestDevelopmentRelease();
+                string latestVersion = latest != null ? NormalizeVersion(latest.Version) : "none";
+                string summary = "SELF_TEST_OK current=" + currentVersion + " latest=" + latestVersion + " log=" + LogPath;
+                Log(summary);
+                Console.WriteLine(summary);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                string message = "SELF_TEST_FAILED " + SafeError(ex);
+                Log(message);
+                Console.Error.WriteLine(message);
+                return 1;
+            }
+        }
+
         private static UpdateResponse CheckForUpdate(string currentVersionText)
         {
             Version currentVersion;
@@ -117,6 +172,7 @@ namespace SupremeFabWorks.AmazonOrderManagerDevUpdater
                 throw new InvalidOperationException("Current extension version is invalid.");
 
             ReleaseCandidate candidate = FindLatestDevelopmentRelease();
+            Log("release lookup current=" + currentVersionText + " latest=" + (candidate != null ? NormalizeVersion(candidate.Version) : "none"));
             if (candidate == null)
             {
                 return new UpdateResponse
@@ -169,7 +225,9 @@ namespace SupremeFabWorks.AmazonOrderManagerDevUpdater
 
                 string packageRoot = LocateExtensionRoot(extractRoot);
                 ValidatePackage(packageRoot, candidate.Version);
+                Log("package verified sha256=" + actualHash + " version=" + latestVersionText);
                 InstallPackage(packageRoot);
+                Log("package installed version=" + latestVersionText);
 
                 return new UpdateResponse
                 {
