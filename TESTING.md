@@ -2,7 +2,7 @@
 
 ## Current test target
 
-**v0.18.1** is the current source baseline after PR #12 release merge. It preserves the v0.17 Amazon crawler/return contract, retains the verified local development auto-update channel, and fixes the live false payment-card last-four contamination found in v0.18.0.
+**v0.18.2** is the current source baseline after PR #16 release merge. It preserves the v0.17 Amazon crawler/return contract, retains the verified local development auto-update channel, and fixes the live false payment-card last-four contamination found in v0.18.0.
 
 Two independent live boundaries remain:
 
@@ -23,12 +23,15 @@ This executes:
 
 ```text
 node parser-test.js
+node payment-evidence-test.js
+node multi-return-test.js
 node storage-test.js
 node background-test.js
 node state-machine-test.js
 node reconciliation-test.js
 node ui-test.js
 node dev-updater-test.js
+node updater-reliability-test.js
 node release-test.js
 ```
 
@@ -48,6 +51,13 @@ Required automated coverage includes:
 - payment last-four parsing is restricted to payment-method/payment-information evidence,
 - generic Amazon DOM `card` layout containers, gift-card values, and unrelated masked numbers cannot populate card last-four,
 - recognized card brands and direct masks under Payment/Refund method headings still parse correctly,
+- multiple explicit return links under one Order ID retain distinct `rmaId`/`contractId` return groups and `itemId` child identities,
+- exact Order Details return-link item evidence is not replaced by conflicting return-page identity,
+- canonical order-level refund is sourced only from the explicit Order Details `Refund Total` label,
+- return-group refund values are counted once and unknown refund values remain unknown rather than `$0.00`,
+- child/group refund integrity conflicts are flagged instead of inflating the order-level refund,
+- updater checks on MV3 worker start, persists status, exposes a popup manual check, and does not depend on a delayed service-worker reload timer,
+- native-host logging/self-test and Windows PowerShell 5.1 diagnostics invariants remain intact,
 - manifest version change wipes development ledger/crawl state,
 - dashboard has fixed `Details / Credit / Reset / Refresh` actions and no horizontal order scrolling,
 - bank reconciliation bridge remains narrow,
@@ -57,6 +67,28 @@ Required automated coverage includes:
 - the extension reloads only after a strictly newer successful native-host install result,
 - missing/invalid native-host responses fail closed without disrupting the extension,
 - CI emits the extension ZIP, SHA-256 sidecar, one-time Windows updater package, and versioned development-release contract.
+
+
+## v0.18.2 live repair and multi-return validation — Issue #15
+
+The v0.18.0 -> v0.18.1 unattended update did not occur. Do not treat Issue #10 as passed. After PR #16 merges and `dev-v0.18.2` is published:
+
+1. Close Chrome completely.
+2. Download/extract the v0.18.2 `amazon-order-manager-dev-updater.zip` and run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
+```
+
+3. Confirm the installer diagnostics report extension ID `hhmimkpolikhncnbkkbbabbopbccabcf`, current files version `0.18.2`, native-host self-test success, and an updater log path.
+4. Reopen Chrome and confirm version `0.18.2` with the same fixed ID.
+5. Open the popup. Confirm updater current/latest/check/error status is visible and **Check development update now** completes without navigating Amazon.
+6. Fresh-scan an Order ID with several independent returns. Verify one order row with separate `Return X of N` children, each bound to its actual returned item.
+7. Verify the order-level Refund value equals Amazon's explicit Order Details `Refund Total` when present. Unknown child amounts must display `—`; child records must not inflate the order total/refund.
+8. Click per-order Refresh and confirm every unique same-order return-status link refreshes independently.
+9. Only after v0.18.2 is confirmed installed should a later higher version be released to prove unattended update. Do not manually replace `current` or press Reload for that proof.
+
+Issue #10 stays open until that later automatic update succeeds.
 
 ## Development auto-update live validation — Issue #10
 

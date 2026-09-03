@@ -2,7 +2,7 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.1 after PR #12 merges.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.2 after PR #16 merges.** GitHub is the source of truth and chat sessions are disposable.
 
 Two issues remain intentionally separate:
 
@@ -18,7 +18,7 @@ Use [`NEW_CHAT_PROMPT.md`](NEW_CHAT_PROMPT.md). `SESSION_PROTOCOL.md` defines ma
 1. Read `AGENTS.md`, `PROJECT_HANDOFF.md`, `README.md`, `TESTING.md`, and `SESSION_PROTOCOL.md`.
 2. Read Issues #7 and #10 and any newer issue that supersedes either scope.
 3. Inspect root source, `manifest.json`, recent commits, open PRs/issues, and tests before editing.
-4. Root v0.18.0 is the active source after its release merge. The archived v0.16.0 ZIP is recovery material only.
+4. Root v0.18.2 is the active source after PR #16 merges. The archived v0.16.0 ZIP is recovery material only.
 5. Run `npm test` before packaging or merging changes.
 6. Every user-testable development revision must bump both `manifest.json` and `package.json` to the same newer Chrome version.
 7. Keep implementation, regression tests, docs, issue state, and handoff synchronized.
@@ -55,7 +55,7 @@ Do not manually replace files inside `current`; the verified native updater owns
 
 `code change -> regression tests -> manifest/package version bump -> PR CI -> merge to main -> CI publishes dev-v<version> prerelease -> installed extension checks updater -> verified files replace current -> chrome.runtime.reload()`
 
-The extension checks at Chrome startup and every 15 minutes. A missing native host, GitHub/network failure, digest mismatch, invalid package, or failed install leaves the current build running and does not trigger a reload.
+The v0.18.0 -> v0.18.1 unattended update did **not** succeed in live Windows testing, so that earlier path is not considered validated. v0.18.2 checks whenever the MV3 service worker starts, at Chrome startup, manually from the popup, and every 15 minutes. It recreates its important alarm, records updater diagnostics, and reloads synchronously only after the native host confirms a verified newer install. A missing native host, GitHub/network failure, digest mismatch, invalid package, or failed install leaves the current build running and exposes a diagnostic instead of reloading.
 
 The native host downloads only the versioned GitHub development extension ZIP and its SHA-256 sidecar. It verifies the digest, embedded manifest version, and required files before replacing the current build. It is restricted to the fixed development extension origin and does not receive Amazon credentials, cookies, passwords, bank credentials, or bank-provider tokens.
 
@@ -69,6 +69,39 @@ The native updater, stable development ID policy, and destructive development ve
 - replace destructive version resets with data migrations,
 - preserve ledger data across normal upgrades,
 - use Chrome Web Store distribution/update mechanisms.
+
+
+## v0.18.2 multi-return model
+
+A single Amazon Order ID may contain multiple independent returns. v0.18.2 models them explicitly as:
+
+`order -> return group (rmaId / contractId) -> returned item(s) (itemId)`
+
+- Every real Order Details `View return/refund status` link is bound to its nearest product block rather than to the whole order.
+- `itemId` is the stable returned-item identity. `rmaId`/`contractId` identify the return group.
+- The Order Details return-link item binding is trusted; a conflicting return-page title/ASIN is flagged for review rather than silently replacing it.
+- Provisional Order Details evidence and the later authoritative return page use the same stable child record identity.
+- If explicit return links exist, the parser does not add an extra broad order-level provisional return.
+- The dashboard renders separate compact `Return X of N` child blocks rather than repeating the full order catalog for every lifecycle.
+- Unknown child refund money displays `—`, never `$0.00`.
+
+### Refund accounting
+
+Amazon Order Details remains canonical for the order-level refund amount. Only the explicit standalone `Refund Total` label may populate `canonicalRefundTotal`. Generic refund lifecycle prose is not an order-level total.
+
+The dashboard therefore:
+
+- displays canonical Order Details `Refund Total` when available,
+- counts a return-group amount only once,
+- sums child item amounts only when item scope is proven,
+- flags conflicting group amounts or a child aggregate that exceeds canonical Refund Total,
+- uses the canonical expected refund for Needs Review totals when an integrity mismatch is present.
+
+### v0.18.2 updater repair
+
+Because the prior installed channel did not update itself from v0.18.0 to v0.18.1, install the v0.18.2 updater/bootstrap package once on the Windows test PC to repair the channel. The popup now exposes updater current/latest/check/error state and **Check development update now**. The native host writes `updater.log` under the updater install root, supports `--self-test`, and `Install.ps1 -DiagnoseOnly` runs local diagnostics.
+
+A later strictly newer release must update unattended from the repaired v0.18.2 installation before Issue #10 can close.
 
 ## Core v0.17/v0.18 product architecture
 

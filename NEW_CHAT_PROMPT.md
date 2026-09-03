@@ -14,13 +14,13 @@ This chat is disposable. Do **not** rely on memory or assumptions from any previ
 2. Read `PROJECT_HANDOFF.md` completely.
 3. Read `README.md` and `TESTING.md`.
 4. Read `SESSION_PROTOCOL.md`.
-5. Read GitHub Issues **#7** and **#10** plus any newer open issue that supersedes either scope.
+5. Read GitHub Issues **#7**, **#10**, **#13**, and **#15** plus any newer open issue that supersedes either scope.
 6. Inspect the current root source tree, manifest/package version, recent commits, open PRs/issues, GitHub development releases, and tests before making changes.
 7. Treat the repository and GitHub issues as authoritative if anything in this prompt becomes stale.
 
 ## Current baseline
 
-The complete root source baseline is **v0.18.1 after PR #12 merges**. The exact v0.16.0 package under `source-snapshots/v0.16.0/full/` is historical recovery/audit material only and must not replace the complete current root unless an intentional rollback is explicitly required.
+The complete root source baseline is **v0.18.2 after PR #16 merges**. The exact v0.16.0 package under `source-snapshots/v0.16.0/full/` is historical recovery/audit material only and must not replace the complete current root unless an intentional rollback is explicitly required.
 
 v0.18 preserves the v0.17 authoritative Amazon behavior and adds the verified Windows development auto-update channel.
 
@@ -50,6 +50,15 @@ After bootstrap, do not manually overwrite the `current` folder. The updater own
 Every user-testable revision must bump **both** `manifest.json` and `package.json` to the same strictly newer Chrome version before merge. Main CI publishes the corresponding `dev-v<version>` prerelease only after tests pass. Do not overwrite an existing development release for another commit; bump the version instead.
 
 The updater is development-only. Do not turn it into a remote-JavaScript loader. Do not place GitHub credentials, Amazon credentials/cookies, bank credentials/tokens, or private keys in the extension/updater. Before production, remove/disable the local updater, replace destructive development version resets with migrations, and use the Chrome Web Store update channel.
+
+
+## v0.18.2 durable additions
+
+Multiple returns under one Amazon Order ID must be modeled as `order -> return group -> returned item(s)`. Preserve Amazon return `rmaId`/`contractId` group identity and `itemId` child identity. Bind each return-status link to its nearest Order Details product block. Exact Order Details item binding is trusted; a conflicting later return-page identity must be flagged for review, not silently substituted.
+
+Only the explicit standalone Order Details `Refund Total` is canonical for the order-level refund. Return/group amounts must be counted once, unknown refund money is `—`, and any child/group aggregate that exceeds the canonical refund is an integrity failure requiring review.
+
+The prior v0.18.0 -> v0.18.1 automatic update failed in live Windows testing. v0.18.2 adds worker-start checks, observable popup updater status/manual check, synchronous reload after verified install, native-host file logging/self-test, and installer diagnostics. v0.18.2 requires one explicit Windows bootstrap repair. A later release must prove unattended update before Issue #10 closes.
 
 ## Amazon product contract
 
