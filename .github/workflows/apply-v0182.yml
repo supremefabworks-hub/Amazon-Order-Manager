@@ -1,0 +1,43 @@
+name: Apply v0.18.2 multi-return and updater fixes
+
+on:
+  push:
+    branches: [v0182-multireturn-updater-reliability]
+    paths:
+      - tools/apply_v0182.py
+      - .github/workflows/apply-v0182.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0182-multireturn-updater-reliability
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Apply v0.18.2 patch
+        run: python3 tools/apply_v0182.py
+      - name: Validate generated source
+        run: |
+          node --check parser.js
+          node --check storage.js
+          node --check dashboard.js
+          node --check content.js
+          node --check background.js
+          node --check dev-updater.js
+          node --check popup.js
+          npm test
+      - name: Commit durable implementation and remove temporary patch machinery
+        shell: bash
+        run: |
+          rm -f tools/apply_v0182.py .github/workflows/apply-v0182.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Implement v0.18.2 multi-return model and updater reliability [v0182-generated]"
+          git push origin HEAD:v0182-multireturn-updater-reliability
