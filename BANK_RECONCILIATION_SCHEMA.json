@@ -1,6 +1,41 @@
 {
-  "requestSchema": "amazon-refund-credit-check-request/v1",
-  "resultSchema": "amazon-refund-credit-check-result/v1",
-  "requestFields": ["requestId","returnRecordId","orderId","itemNames","expectedRefund","paymentCardLast4","refundIssuedDate","expectedCreditDate","amazonStage"],
-  "resultFields": ["requestId","returnRecordId","orderId","status","matchedAmount","postedDate","accountLast4","accountName","merchantName","confidence","reason"]
+  "requestSchema": {
+    "schema": "amazon-refund-credit-check-request/v1",
+    "requestId": "uuid",
+    "generatedAt": "ISO-8601",
+    "returns": [
+      {
+        "returnRecordId": "return:ORDER:TOKEN",
+        "orderId": "113-...",
+        "itemNames": [
+          "Item title"
+        ],
+        "expectedRefund": 150.84,
+        "paymentCardLast4": "3172",
+        "refundIssuedDate": "2026-08-31",
+        "expectedCreditDate": "2026-09-07",
+        "amazonStage": "refund_issued"
+      }
+    ]
+  },
+  "resultSchema": {
+    "schema": "amazon-refund-credit-check-result/v1",
+    "requestId": "same requestId",
+    "generatedAt": "ISO-8601",
+    "checkedAt": "ISO-8601",
+    "matches": [
+      {
+        "returnRecordId": "return:ORDER:TOKEN",
+        "orderId": "113-...",
+        "status": "confirmed | pending | not_found | ambiguous | needs_review",
+        "matchedAmount": 150.84,
+        "postedDate": "2026-09-03",
+        "accountLast4": "3172",
+        "accountName": "Amazon Visa",
+        "merchantName": "Amazon Marketplace",
+        "confidence": "exact",
+        "reason": "Exact posted credit amount on expected card after refund issue date."
+      }
+    ]
+  }
 }

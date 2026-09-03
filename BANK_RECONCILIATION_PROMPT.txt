@@ -1,11 +1,15 @@
 Amazon Refund Ledger bank reconciliation request
 
-Upload the exported bank-credit-check request JSON to ChatGPT and ask it to reconcile every return against connected Finances accounts.
+Upload the exported `amazon-refund-credit-check-YYYY-MM-DD.json` file to ChatGPT and send:
 
-Rules:
-- Only posted credits can confirm Bank credited.
-- Pending transactions may be reported as pending but are not confirmed.
-- Prefer exact refund amount, matching card last four when available, Amazon merchant evidence, and a plausible posting date after refund issuance.
-- Never reuse one credit for multiple return records unless it clearly represents a combined refund.
-- Missing exact evidence stays pending/not_found; multiple plausible matches are ambiguous.
-- Do not include bank credentials, full account numbers, or unrelated transactions in the result.
+Reconcile every return in this Amazon Refund Ledger bank-credit-check request against my connected Finances accounts.
+
+Matching rules:
+- Use posted credits for confirmation; pending transactions may be reported as pending but must not be confirmed.
+- Prefer exact refund amount, matching payment-card last four when available, Amazon/Amazon Marketplace merchant evidence, and a plausible posting date after the refund-issued date.
+- Do not reuse one bank credit for multiple return records unless the transaction clearly represents a combined refund and explain the grouping.
+- If no exact/strong posted match exists, return `pending` or `not_found`; do not guess.
+- If multiple plausible credits exist, return `ambiguous`.
+- Return a downloadable JSON with schema `amazon-refund-credit-check-result/v1`, echo the same requestId, and include one match per returnRecordId.
+
+Do not include bank credentials, account numbers beyond last four, or unrelated transactions in the result.
