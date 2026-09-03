@@ -85,4 +85,12 @@ if needle not in text:
     raise RuntimeError('state-machine version regression anchor missing')
 path.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
 
+# The release assertion must be durable in the committed candidate, not only modified in a CI workspace.
+patch(
+    'reconciliation-test.js',
+    "manifest.version !== '0.16.0'",
+    "manifest.version !== '0.17.0'",
+    'reconciliation manifest version'
+)
+
 print('v0.17 review hardening applied')
