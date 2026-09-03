@@ -14,21 +14,46 @@ This chat is disposable. Do **not** rely on memory or assumptions from any previ
 2. Read `PROJECT_HANDOFF.md` completely.
 3. Read `README.md` and `TESTING.md`.
 4. Read `SESSION_PROTOCOL.md`.
-5. Read GitHub Issue **#7 — v0.17 authoritative details, return refresh, crawler and UI fixes** and any newer open issues that supersede it.
-6. Inspect the current root source tree, manifest version, recent commits, open PRs/issues, and tests before making changes.
+5. Read GitHub Issues **#7** and **#10** plus any newer open issue that supersedes either scope.
+6. Inspect the current root source tree, manifest/package version, recent commits, open PRs/issues, GitHub development releases, and tests before making changes.
 7. Treat the repository and GitHub issues as authoritative if anything in this prompt becomes stale.
 
 ## Current baseline
 
-The complete root source baseline is **v0.17.0**. The exact v0.16.0 package under `source-snapshots/v0.16.0/full/` is historical recovery/audit material only and must not replace the complete v0.17 root unless an intentional rollback is explicitly required.
+The complete root source baseline is **v0.18.0 after PR #11 merges**. The exact v0.16.0 package under `source-snapshots/v0.16.0/full/` is historical recovery/audit material only and must not replace the complete current root unless an intentional rollback is explicitly required.
 
-v0.17.0 implements the repository code/test scope for Issues #2–#7. The automated regression suite passes. Issue #7 remains open until the documented **live Amazon Business acceptance checklist** in `TESTING.md` is completed or any defects discovered by that live test are fixed.
+v0.18 preserves the v0.17 authoritative Amazon behavior and adds the verified Windows development auto-update channel.
 
-## Current product contract
+Two live-validation tracks remain separate:
 
-This is a Chrome Manifest V3 Amazon / Amazon Business Order Manager and Refund Ledger.
+- Issue #7 stays open until the documented live Amazon Business acceptance checklist in `TESTING.md` passes.
+- Issue #10 stays open until the one-time Windows native-updater bootstrap and one subsequent real automatic update to a strictly newer version both pass.
 
-The required crawler sequence is strict:
+## Development auto-update contract
+
+The development extension uses a stable public manifest key and fixed extension ID:
+
+`hhmimkpolikhncnbkkbbabbopbccabcf`
+
+The fixed unpacked installation directory after one-time bootstrap is:
+
+`%LOCALAPPDATA%\SupremeFabWorks\AmazonOrderManagerDev\current`
+
+The native host is:
+
+`com.supremefabworks.amazon_order_manager_updater`
+
+The extension checks for updates at Chrome startup and every 15 minutes. The native host considers only versioned GitHub prereleases tagged `dev-v<version>`, downloads `amazon-order-manager.zip` plus `amazon-order-manager.zip.sha256`, verifies the SHA-256 digest, embedded manifest version, and required files, stages the directory replacement, and reports success only after installation. The extension calls `chrome.runtime.reload()` only after a strictly newer successful install.
+
+After bootstrap, do not manually overwrite the `current` folder. The updater owns it.
+
+Every user-testable revision must bump **both** `manifest.json` and `package.json` to the same strictly newer Chrome version before merge. Main CI publishes the corresponding `dev-v<version>` prerelease only after tests pass. Do not overwrite an existing development release for another commit; bump the version instead.
+
+The updater is development-only. Do not turn it into a remote-JavaScript loader. Do not place GitHub credentials, Amazon credentials/cookies, bank credentials/tokens, or private keys in the extension/updater. Before production, remove/disable the local updater, replace destructive development version resets with migrations, and use the Chrome Web Store update channel.
+
+## Amazon product contract
+
+Required crawler sequence:
 
 `newest year -> page 1 -> capture every visible unique order -> complete canonical Order Details for every order -> next page -> repeat until no more pages -> next older year`
 
@@ -44,33 +69,33 @@ Normal orders are not returns. `Return or replace items` availability alone must
 
 Return records must be item-level for bundled orders: show the actual returned product and the expected refund amount for that returned item/return record, never the full bundled order total duplicated onto every returned item. Multiple separate returns under one Amazon Order ID must remain separate records.
 
-Return lifecycle must be evidence-based. In-progress returns must not be labeled `Refund issued` without affirmative Amazon milestone evidence. Future credit dates are ETAs, not completed credits. Bank credit confirmation remains isolated from the extension through the narrow reconciliation bridge described in the repo.
+Return lifecycle must be evidence-based. In-progress returns must not be labeled `Refund issued` without affirmative Amazon milestone evidence. Future credit dates are ETAs, not completed credits. Bank credit confirmation remains isolated through the narrow reconciliation bridge described in the repo.
 
 Payment-card last-four parsing must be scoped to actual payment-method/payment-information evidence. Never use arbitrary four-digit page text.
 
-The dashboard must stay compact, symmetric, systematic, and never use horizontally scrollable order containers. All rows use the same grid and the same fixed four actions: `Details`, `Credit`, `Reset`, `Refresh`. Inapplicable actions are disabled rather than removed.
+The dashboard must stay compact, symmetric, systematic, and never use horizontally scrollable order containers. All rows use the same grid and fixed four actions: `Details`, `Credit`, `Reset`, `Refresh`. Inapplicable actions are disabled rather than removed.
 
 `Refresh` must use the stored real Order Details URL, open an inactive/background Amazon detail tab, refresh the rendered canonical detail capture, follow real return-status links for the same order when present, save fresh state, and close the temporary tab.
 
-During active development, a manifest version change wipes extension ledger/crawl state so each version starts clean. This is a development policy and must be disabled/replaced with migrations before production persistence is expected.
+During active development, a manifest version change wipes extension ledger/crawl state so each version starts clean. This must be disabled/replaced with migrations before production persistence is expected.
 
 ## Implementation behavior
 
 Work directly from the repository. Prefer concrete code changes over high-level advice. Preserve the security/privacy constraints in `AGENTS.md` and `PROJECT_HANDOFF.md`. Do not add CAPTCHA bypass, stealth/anti-detection behavior, password/cookie harvesting, or bank credentials to the extension.
 
-Run `npm test` before packaging. Add regression tests for every bug fixed. For Amazon-specific behavior that cannot be proven from fixtures, use the live acceptance checklist and explicit diagnostics/checkpoints rather than guessing.
+Run `npm test` before packaging. Add regression tests for every bug fixed. For Windows native-host behavior or Amazon behavior that cannot be proven from Linux fixtures, use the explicit live acceptance checklists rather than claiming it is validated.
 
 When a coherent implementation pass is complete:
 
-- bump the extension version if producing a new test build,
+- bump manifest/package version if producing a new user-testable build,
 - update source/tests/docs,
 - update or close relevant GitHub issues,
-- update `PROJECT_HANDOFF.md` if architecture, current baseline, known bugs, live Amazon behavior, or acceptance criteria changed,
+- update `PROJECT_HANDOFF.md` if architecture, current baseline, known bugs, live findings, updater behavior, or acceptance criteria changed,
 - commit everything needed to resume in another fresh chat,
-- ensure no real Amazon exports, addresses, payment data, bank data, or Teach Mode logs are committed.
+- ensure no real Amazon exports, addresses, payment data, bank data, private keys, credentials, or Teach Mode logs are committed.
 
 Do not leave important project state only in this chat. The repository must remain sufficient for the next chat to continue without this conversation.
 
-Start by reporting the current baseline/version, active issue/goal, whether the root source tree is complete, and the exact plan. Then proceed with the work rather than asking me to restate prior context.
+Start by reporting the current baseline/version, active issues/goals, whether root source is complete, the current development release status, and the exact plan. Then proceed with the work rather than asking me to restate prior context.
 
 ---
