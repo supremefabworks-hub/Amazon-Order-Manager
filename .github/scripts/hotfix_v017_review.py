@@ -11,6 +11,12 @@ def patch(path, old, new, label):
 # Payment last-four must come from locally scoped payment evidence when parsing a DOM document.
 patch(
     'parser.js',
+    "  function extractPaymentEvidenceText(container) {\n    if (!container?.querySelectorAll) return '';",
+    "  function extractPaymentEvidenceText(container) {\n    if (!container) return '';",
+    'payment evidence body support'
+)
+patch(
+    'parser.js',
     "    return chunks.join('\\n');\n  }\n\n  function extractOrderIds",
     "    if (!chunks.length) {\n      const lines = normalizeText(container.innerText || container.textContent || '').split('\\n').map(line => line.trim()).filter(Boolean);\n      for (let i = 0; i < lines.length; i += 1) {\n        if (!/payment\\s+(?:method|information)/i.test(lines[i])) continue;\n        add(lines.slice(i, i + 5).join(' '));\n      }\n    }\n    return chunks.join('\\n');\n  }\n\n  function extractOrderIds",
     'payment local-text fallback'
