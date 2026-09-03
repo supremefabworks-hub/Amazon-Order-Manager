@@ -2,20 +2,30 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current baseline:** v0.16.0. This repository is now the source of truth. A new development session should read `AGENTS.md` and `PROJECT_HANDOFF.md` before changing crawler, parser, return-state, card, UI, or reconciliation logic.
+**Current baseline:** v0.16.0. This repository is the source of truth. Chat sessions are intentionally disposable; no development session should require access to an earlier chat.
+
+## Start a completely new chat
+
+Use the exact reusable prompt in [`NEW_CHAT_PROMPT.md`](NEW_CHAT_PROMPT.md). It instructs a fresh session to reconstruct all context from GitHub, inspect the active issue/source/tests, recover the verified snapshot if necessary, implement the next work, and write all new project state back to GitHub before the chat ends.
+
+`SESSION_PROTOCOL.md` defines the mandatory startup and handoff process. `AGENTS.md` instructs AI/contributors not to depend on chat memory.
 
 ## Resume development
 
-1. Read `PROJECT_HANDOFF.md` for the architecture, Amazon Business pagination findings, known defects, privacy constraints, and acceptance tests.
-2. Use **Issue #7 — v0.17 authoritative details, return refresh, crawler and UI fixes** as the primary active implementation checklist.
-3. The exact pre-GitHub v0.16.0 extension ZIP is archived under `source-snapshots/v0.16.0/full/`. Reconstruct it using that directory's README if a known-good baseline is needed.
-4. Snapshot integrity: SHA-256 `0ac308d98a4acf47fff51f5fd63410a9e9dc8e6105e7d6f17dcebd9b6e71ac42`, size `77,670` bytes.
-5. New development should keep ordinary editable source files at repository root and continue as v0.17.0.
-6. During active development, version changes should wipe local extension ledger/crawl state so every build starts clean. Disable that destructive policy before a production release.
+1. Read `AGENTS.md`, `SESSION_PROTOCOL.md`, and `PROJECT_HANDOFF.md`.
+2. Read `README.md` and `TESTING.md`.
+3. Use **Issue #7 — v0.17 authoritative details, return refresh, crawler and UI fixes** as the primary active implementation checklist unless a newer issue supersedes it.
+4. Inspect current root source, manifest version, recent commits, and tests rather than assuming the repo state.
+5. The exact pre-GitHub v0.16.0 extension ZIP is archived under `source-snapshots/v0.16.0/full/`. Reconstruct it using that directory's README if a known-good baseline is needed.
+6. Snapshot integrity: SHA-256 `0ac308d98a4acf47fff51f5fd63410a9e9dc8e6105e7d6f17dcebd9b6e71ac42`, size `77,670` bytes.
+7. New development should keep ordinary editable source files at repository root and continue as v0.17.0.
+8. During active development, version changes should wipe local extension ledger/crawl state so every build starts clean. Disable that destructive policy before a production release.
 
 ## Development workflow
 
 Clone this repository once and load the repository root with Chrome **Load unpacked** once the active source tree is complete. Thereafter, pull changes and click **Reload** in `chrome://extensions`. CI is configured to run the regression suite and package an installable ZIP once the full active source is present at repository root.
+
+Every coherent development session must commit implementation, regression tests, changed architecture/acceptance criteria, and issue state. Critical information must never live only in chat.
 
 ## Current architecture
 
@@ -42,7 +52,9 @@ Do not assume that `?timeFilter=year-YYYY&startIndex=N` will advance this UI; it
 - Add per-order **Refresh** using an inactive background Order Details tab.
 - Refresh real return lifecycle status from the return-status link exposed by Order Details.
 - Prevent false `Refund issued` classifications and preserve monotonic return state.
+- Track the actual returned item and item-level expected refund for bundled orders.
 - Standardize every ledger row to one compact symmetric grid; enlarge Details / Credit / Reset / Refresh and keep them side-by-side.
 - Preserve exact year/page/order crawl checkpoints and treat overlapping Order IDs as overlap evidence, not duplicate orders.
+- Finish all pages in one year before selecting the next older year.
 
 See `PROJECT_HANDOFF.md` and Issue #7 before implementing the next build.
