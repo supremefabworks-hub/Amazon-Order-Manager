@@ -2,15 +2,18 @@
   "manifest_version": 3,
   "name": "Amazon Refund Ledger",
   "short_name": "Refund Ledger",
-  "version": "0.17.0",
-  "description": "Amazon order/refund ledger with authoritative Order Details capture, evidence-based return refresh, fingerprint-verified lifetime crawling, per-order background Refresh, and secure bank-credit reconciliation bridge.",
+  "version": "0.18.0",
+  "version_name": "0.18.0",
+  "description": "Amazon order/refund ledger with authoritative details, strict crawling, return refresh, and verified local dev auto-updates.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnsZ/RV464WKrjVSJ0ZVvLOXF/xIZgQvSIOabZY4cPdNlBji0PwoLIozqSYQPm8B0jy9Ia3pdYZLENHlkqYh/SMlvbCrSn6Xj+fozaY8mOPKWwhNgUMjuJhCSP2p2T8tij6cgWCTQ/A+gun7Je5JAZ8pWjZvMfRhLlbTKvBUsvCPsWeYS6LHEnMRC0eQ9d47g6Ww0q9Sm4TEMNd+Fchs3aEuQkuq49+p/tMCwcmiZf208G3Xp5Rur3PM9tXwPbkwmAuMZlfVKoinzD9eLcNsiqeBZOCeKVj/6AUIHuIPTqYX5lYKiWFl7mWQeOuQf0UohVPOhkRa6Iw6rqsqQ8twmAwIDAQAB",
   "permissions": [
     "storage",
     "activeTab",
     "tabs",
     "alarms",
     "unlimitedStorage",
-    "webRequest"
+    "webRequest",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "https://amazon.com/*",
@@ -19,7 +22,7 @@
     "https://*.amazon.com/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "service-worker.js"
   },
   "action": {
     "default_title": "Amazon Refund Ledger",
@@ -41,6 +44,5 @@
       ],
       "run_at": "document_idle"
     }
-  ],
-  "version_name": "0.17.0"
+  ]
 }

@@ -4,11 +4,155 @@
 
 Chrome Manifest V3 Amazon / Amazon Business Order Manager and Refund Ledger.
 
-**Current source baseline: v0.17.0.** The root source tree is complete and is the active development source. The exact pre-GitHub v0.16.0 archive remains under `source-snapshots/v0.16.0/full/` for historical recovery only.
+**Current source baseline: v0.18.0 after PR #11 merges.** Root source remains the active development source. The exact pre-GitHub v0.16.0 archive under `source-snapshots/v0.16.0/full/` is historical recovery material only.
 
-v0.17.0 implements the code/test scope of Issues #2–#7. Automated Node regressions pass. **Live Amazon Business acceptance is still required before Issue #7 should be considered fully closed**, because repository fixtures cannot prove the account-specific live pager, rendered Order Details markup, or live return-page markup.
+v0.18 preserves the complete v0.17 Amazon crawler/details/returns/dashboard contract and adds a verified Windows development auto-update channel.
 
-## Product contract
+Two live-validation tracks remain separate:
+
+- **Issue #7** — live Amazon Business acceptance of the v0.17 authoritative Amazon behavior. The code/test scope is implemented; real account-specific markup still requires live acceptance.
+- **Issue #10** — v0.18 verified development auto-update pipeline. Code/tests/CI are implemented; the Windows bootstrap and one subsequent real automatic update must be live-validated before closure.
+
+## v0.18 development auto-update architecture
+
+### Purpose
+
+Eliminate the repetitive unpacked-extension cycle of downloading a ZIP, copying files, and manually pressing Reload after every revision, without allowing the extension to download/execute remote JavaScript or weakening MV3 security.
+
+### Stable development identity
+
+The development manifest contains a public `key` so the unpacked extension has a stable ID:
+
+```text
+hhmimkpolikhncnbkkbbabbopbccabcf
+```
+
+Native host name:
+
+```text
+com.supremefabworks.amazon_order_manager_updater
+```
+
+Allowed native-messaging origin:
+
+```text
+chrome-extension://hhmimkpolikhncnbkkbbabbopbccabcf/
+```
+
+Protocol:
+
+```text
+arl-dev-updater-v1
+```
+
+The private RSA material used to derive the public manifest key is not required by the development runtime and must never be added to the repository.
+
+### Extension side
+
+`manifest.json` uses `service-worker.js` as the service worker. The wrapper imports:
+
+```text
+background.js -> existing Amazon/order/crawl behavior
+dev-updater.js -> development update bridge
+```
+
+`dev-updater.js`:
+
+- uses `nativeMessaging`,
+- checks at Chrome startup and every 15 minutes,
+- sends only updater protocol/version/extension-ID/reason metadata to the native host,
+- records update diagnostics under `devUpdateStatus`,
+- treats missing host, network failure, invalid response, or host error as non-fatal,
+- calls `chrome.runtime.reload()` only when the host reports a successful install whose version is strictly newer than the currently running manifest version,
+- uses its own alarm name and does not enqueue Amazon crawl jobs.
+
+### Windows native host
+
+`tools/dev-updater/NativeHost.cs` is a small .NET Framework native messaging host.
+
+It:
+
+1. requires Chrome's caller origin to exactly match the fixed development origin,
+2. requires the request extension ID to match the fixed development ID,
+3. queries this repository's public GitHub releases,
+4. considers only non-draft prereleases tagged `dev-v<Chrome numeric version>`,
+5. selects the highest valid version,
+6. does nothing unless that version is strictly newer than the running extension,
+7. requires both `amazon-order-manager.zip` and `amazon-order-manager.zip.sha256`,
+8. downloads both over HTTPS,
+9. verifies SHA-256 before extraction,
+10. verifies the embedded manifest version matches the GitHub release tag,
+11. verifies required extension files exist,
+12. stages files in a `.next-*` directory,
+13. moves the current successful build to `previous`,
+14. promotes the staged build to `current`,
+15. attempts rollback if the swap fails,
+16. reports success only after the verified install finishes.
+
+No Amazon credentials, cookies, passwords, bank credentials, financial-provider tokens, or bank transaction feeds are sent to this host.
+
+### One-time Windows bootstrap
+
+CI publishes `amazon-order-manager-dev-updater.zip`, containing:
+
+- `Install.ps1`
+- `NativeHost.cs`
+- updater README
+
+Run once:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
+```
+
+Default installation root:
+
+```text
+%LOCALAPPDATA%\SupremeFabWorks\AmazonOrderManagerDev
+```
+
+Permanent unpacked Chrome directory:
+
+```text
+%LOCALAPPDATA%\SupremeFabWorks\AmazonOrderManagerDev\current
+```
+
+The installer compiles the native host with Windows PowerShell/.NET Framework, registers it under HKCU for Chrome, downloads the latest verified development release, validates it, and installs `current`.
+
+The user must then perform one final manual migration in `chrome://extensions`: remove the older unpacked copy and load this fixed `current` directory. After that, do not manually overwrite `current`.
+
+### CI/release flow
+
+`.github/workflows/ci.yml` runs on PRs and main pushes.
+
+For every candidate it:
+
+1. verifies required source files exist,
+2. runs `npm test`,
+3. packages `amazon-order-manager.zip`,
+4. writes `amazon-order-manager.zip.sha256`,
+5. packages `amazon-order-manager-dev-updater.zip`,
+6. uploads all three as an Actions artifact.
+
+For successful pushes to `main`, it publishes a GitHub prerelease tagged:
+
+```text
+dev-v<manifest version>
+```
+
+If that tag already exists for the same commit, a workflow rerun succeeds idempotently. If the tag exists for a different commit, CI fails. Therefore **every user-testable revision must bump both `manifest.json` and `package.json` to the same strictly newer version**.
+
+### Production boundary
+
+The following are development-only and must not silently become the production distribution architecture:
+
+- local Native Messaging updater,
+- development manifest ID/key policy,
+- destructive `DEV_RESET_ON_VERSION_CHANGE` behavior.
+
+Before Chrome Web Store production release, disable/remove the local updater, replace destructive resets with explicit data migrations, preserve ledger state across normal upgrades, and use the Chrome Web Store update channel.
+
+## Product contract preserved from v0.17
 
 ### 1. Strict lifetime crawler
 
@@ -19,141 +163,118 @@ Required sequence:
 Rules:
 
 - Never switch years while Amazon still exposes an enabled next-page control.
-- Pagination progress is accepted **only** when the visible Order-ID fingerprint changes.
-- URL/hash changes without a changed non-empty Order-ID fingerprint are not progress.
+- Pagination progress is accepted only when the visible non-empty Order-ID fingerprint changes.
+- URL/hash changes without a fingerprint change are not progress.
 - Repeated page contents are failed pagination and stop/retry at the same checkpoint.
 - Keep exact year/page/order checkpoint state.
 - Deduplicate globally by Amazon Order ID.
-- Orders repeated across history pages are overlap evidence, not duplicate order records.
-- A visible history Order ID with no real `View order details` URL is a hard crawler stop. v0.17 does **not** synthesize a canonical Order Details URL.
+- Repeated orders are overlap evidence, not duplicate canonical records.
+- A visible history Order ID with no real `View order details` URL is a hard crawler stop. Never synthesize a canonical detail URL.
 
-Observed Amazon Business UI remains hash-routed, for example:
+Observed Amazon Business hash routes include:
 
 - `#time/2026/pagination/1/`
 - `#time/2026/pagination/2/`
 - `#time/2026/pagination/3/`
 
-Prefer Amazon's real numbered pager / Next control. Legacy `timeFilter/startIndex` pagination is retained only for query-routed non-Business compatibility and must not be used as the primary Business traversal.
+Prefer Amazon's real numbered pager / Next control. Legacy query pagination is compatibility-only for query-routed non-Business pages.
 
 ### 2. Order Details is canonical
 
-Every order must retain the real Amazon `View order details` URL discovered from history.
+Every order retains the real Amazon `View order details` URL discovered from history.
 
-Canonical detail parsing is successful only when:
+Canonical detail parsing succeeds only when:
 
 - the page is an Amazon Order Details route,
-- the URL Order ID matches the order being captured,
-- an order date is captured,
-- an order total is captured,
+- URL Order ID matches the order being captured,
+- order date is captured,
+- finite order total is captured,
 - at least one item title is captured.
 
-Only then is `detailScanComplete=true`; only those orders may display the `Detailed` badge.
-
-Bulk lifetime crawling may continue to fetch the real captured Order Details URL through the authenticated Amazon content-script context with `credentials: "include"` and parse it with `DOMParser`. It may not invent the URL.
+Only then may `detailScanComplete=true` / `Detailed` be displayed.
 
 ### 3. Return lifecycle is secondary enrichment
 
-A normal order is not a return. `Return or replace items`, `Start a return`, or return eligibility alone must never create a return.
+A normal order is not a return. `Return or replace items`, `Start a return`, or return eligibility alone never creates a return.
 
-A real existing return-status URL such as `/spr/returns/prep?...` discovered from Order Details may be followed only for that same Amazon Order ID to refresh return lifecycle data.
+A real existing return-status URL such as `/spr/returns/prep?...` discovered from Order Details may be followed only for the same Amazon Order ID.
 
-Bulk detail refresh follows real `/spr/returns/prep` links through the authenticated Amazon session and parses the returned HTML. The explicit per-order dashboard **Refresh** action uses a separate rendered inactive/background Amazon tab as the stronger manual recovery path.
-
-Return lifecycle remains evidence-based:
+Lifecycle remains evidence-based and monotonic:
 
 `Initiated -> Dropped off / shipped -> Amazon received -> Refund issued -> Bank credited`
 
 - Static timeline labels are not completion evidence by themselves.
 - `Refund issued` requires affirmative Amazon issuance wording.
-- A future `credited by <date>` value is stored/displayed as an ETA, never as completed credit.
-- Return stage merge is monotonic; stale scans cannot regress a later authoritative stage.
+- A future `credited by <date>` is an ETA, not completed credit.
 - Bank credit confirmation remains separate from Amazon lifecycle state.
 
 ### 4. Bundled / multi-item returns
 
-Return records are item-level under one canonical order.
+Return records are item-level beneath one canonical order.
 
-v0.17 return record identity includes the return token plus the returned item identity, allowing multiple returned items and multiple separate returns under one Amazon Order ID.
-
-Rules:
-
-- The returned item title/ASIN must come from return-scoped evidence.
-- A provisional return discovered from an Order Details status link must not copy all bundled order items and pretend they were returned.
-- When an authoritative return page arrives, provisional item names/ASINs are replaced by the authoritative returned-item data.
-- If multiple returned items are present, each record gets its own locally scoped expected-refund amount when Amazon exposes it.
-- A whole return/order total must not be duplicated onto every returned item. If an item-specific amount cannot be proven for a multi-item return, leave that item's amount unknown rather than assigning the bundle total.
+- Returned title/ASIN must come from return-scoped evidence.
+- Provisional return discovery must not copy every bundled item and claim they were returned.
+- Authoritative return captures replace provisional item identity.
+- Each returned item gets only its own locally scoped expected refund when proven.
+- Whole-order/whole-return totals must not be duplicated across returned items.
+- Multiple separate returns under one Amazon Order ID remain distinct records.
 
 ### 5. Payment-card last four
 
-Card last-four extraction is restricted to payment-method/payment-information evidence.
+Card last-four extraction is restricted to payment-method/payment-information evidence. Whole-page arbitrary four-digit text is not a fallback.
 
-- DOM parsing first collects payment-scoped elements.
-- If Amazon lacks useful payment selectors, a narrow local text window beginning at `Payment method` or `Payment information` may be used.
-- Whole-page text is not used as a fallback during document parsing.
-- Arbitrary masked four-digit text elsewhere on the page must remain ignored.
+### 6. Dashboard / Refresh
 
-### 6. Dashboard
-
-Primary views remain:
+Primary views:
 
 - `All orders`
 - `Returns`
 - `Needs review`
 
-Every order uses the same fixed row/grid structure. Rows do not become horizontally scrollable.
-
-Every row has the same four side-by-side actions:
+Every order uses the same fixed grid with side-by-side:
 
 - `Details`
 - `Credit`
 - `Reset`
 - `Refresh`
 
-Inapplicable actions are disabled rather than removed so the grid remains symmetric.
+Inapplicable actions are disabled rather than removed. Rows do not become horizontally scrollable.
 
-`Refresh`:
+Per-order `Refresh` requires the stored real Order Details URL, opens an inactive Amazon detail tab, parses a complete matching canonical capture, follows real same-order return links when present, saves authoritative results, and closes the temporary tab.
 
-1. requires the stored real Order Details URL,
-2. opens an inactive Amazon Order Details tab,
-3. parses the rendered canonical detail page,
-4. requires a complete matching canonical capture,
-5. follows real `/spr/returns/prep` links for the same order when present,
-6. saves authoritative return records,
-7. closes the temporary refresh tab.
-
-`Needs review` dollar total is the sum of expected refund amounts for the return records currently flagged Needs Review.
+Needs Review dollars are the expected-refund sum of return records currently flagged Needs Review.
 
 ### 7. Development reset policy
 
-During active development `DEV_RESET_ON_VERSION_CHANGE` is enabled in `background.js`.
-
-On an extension version change, v0.17 clears local ledger/crawl/worker/workflow/bank-verification state and stores the new manifest version. The `runtime.onInstalled` previous-version hint is used so an upgrade from v0.16 resets correctly even though v0.16 did not yet store the new version key.
-
-Disable or replace this destructive development behavior with migrations before a production release where users expect ledger persistence across versions.
+`DEV_RESET_ON_VERSION_CHANGE` remains enabled during active development. A version change clears local ledger/crawl/worker/workflow/bank-verification state and records the new version. v0.18 therefore intentionally starts clean when moving from v0.17.
 
 ### 8. Bank reconciliation privacy boundary
 
-Bank credentials, financial-provider tokens, and full bank transaction feeds never enter the extension.
+Bank credentials, provider tokens, and full bank transaction feeds never enter the extension.
 
-The supported bridge remains narrow:
+Supported bridge:
 
-1. extension exports refund verification request JSON,
+1. extension exports narrow refund-verification request JSON,
 2. reconciliation occurs outside the extension against separately connected financial accounts,
 3. extension imports narrow verification-result JSON.
 
-Only posted/confirmed evidence completes `Bank credited`. Pending, ambiguous, or not-found matches do not.
+Only posted/confirmed evidence completes `Bank credited`.
 
 ## Current source structure
 
-- `manifest.json` — MV3 manifest, version 0.17.0.
+- `manifest.json` — MV3 manifest, v0.18.0, fixed development ID, nativeMessaging permission.
+- `service-worker.js` — imports core background worker then development updater bridge.
 - `background.js` — queue, strict crawl state machine, fingerprint validation, rendered per-order refresh, development version reset.
+- `dev-updater.js` — native-host update check/reload coordination.
 - `content.js` — Amazon page scan, authenticated canonical detail fetch, real return-status enrichment.
-- `parser.js` — history/detail/return parsing, payment scoping, item-level return parsing.
-- `storage.js` — canonical ledger merge, monotonic return state, provisional-to-authoritative return replacement, reconciliation state.
-- `dashboard.html` / `dashboard.js` / `ui.css` — fixed compact order grid and four-action row layout.
-- `popup.html` / `popup.js` — compact extension status/menu.
-- `workflow-recorder.js` — Teach Mode diagnostics; do not commit real account logs.
-- `parser-test.js`, `storage-test.js`, `background-test.js`, `state-machine-test.js`, `reconciliation-test.js`, `ui-test.js` — regression suites.
+- `parser.js` — history/detail/return/payment parsing.
+- `storage.js` — canonical ledger merge, monotonic return state, reconciliation state.
+- `dashboard.html` / `dashboard.js` / `ui.css` — fixed compact ledger UI.
+- `popup.html` / `popup.js` — compact status/menu.
+- `workflow-recorder.js` — Teach Mode diagnostics; never commit real account logs.
+- `tools/dev-updater/NativeHost.cs` — Windows native updater host.
+- `tools/dev-updater/Install.ps1` — one-time Windows bootstrap.
+- `parser-test.js`, `storage-test.js`, `background-test.js`, `state-machine-test.js`, `reconciliation-test.js`, `ui-test.js`, `dev-updater-test.js`, `release-test.js` — regression suites.
 
 ## Automated validation
 
@@ -163,62 +284,49 @@ Run:
 npm test
 ```
 
-v0.17.0 test command executes:
+v0.18 adds updater/release regressions to the six v0.17 suites. Important updater coverage includes:
 
-- `node parser-test.js`
-- `node storage-test.js`
-- `node background-test.js`
-- `node state-machine-test.js`
-- `node reconciliation-test.js`
-- `node ui-test.js`
+- manifest/package version parity,
+- fixed extension ID derived from manifest key,
+- host/origin constant consistency,
+- 15-minute alarm scheduling,
+- reload only after strictly newer successful install,
+- invalid/missing host responses fail closed,
+- CI checksum/release asset invariants.
 
-The v0.17 candidate passed the complete suite in GitHub Actions before release review.
+The Windows native host compiler/runtime and registry integration cannot be proven by Linux CI; those remain explicit live acceptance items in `TESTING.md`.
 
-Important v0.17 regression coverage includes:
+## Required live acceptance
 
-- no synthesized canonical Order Details URL,
-- visible Order IDs remain independent from discovered detail links,
-- URL-only pagination change is rejected,
-- missing real detail link stops managed crawl,
-- unrelated four-digit text is not a payment card,
-- payment scope does not fall back to whole-page text,
-- future credit ETA does not become completed credit,
-- item-level return IDs and refund amounts,
-- authoritative return capture replaces provisional bundled-item contamination,
-- version-change clean reset, including v0.16 -> v0.17 with no prior version key,
-- fixed Details / Credit / Reset / Refresh UI and enlarged click targets,
-- no horizontal order scrolling.
+### Issue #7 — Amazon Business
 
-## Required live Amazon Business acceptance for v0.17
+Use the complete `TESTING.md` checklist. At minimum verify strict same-year pagination, complete real canonical detail links, evidence-only payment/returns/refunds, bundled item-level returns, per-order background Refresh, symmetric dashboard rows, and Needs Review totals.
 
-Still verify on the user's actual Amazon Business account:
+### Issue #10 — development auto-update
 
-1. Start with a clean v0.17 ledger after reload/update.
-2. 2026 page 1 -> page 2 -> page 3 advances with different visible Order-ID fingerprints.
-3. The crawler does not switch to 2025 while an enabled 2026 Next control exists.
-4. A repeated page/fingerprint stops or retries instead of counting progress.
-5. Every row labeled `Detailed` came from a complete matching real Order Details URL.
-6. Missing real `View order details` anchors stop the crawler rather than fabricating URLs.
-7. Card last four matches Amazon payment-method/payment-information evidence only.
-8. A normal order with only `Return or replace items` stays a normal order.
-9. A real existing `/spr/returns/prep` link updates the same order's return lifecycle.
-10. An in-progress return never displays `Refund issued` without affirmative Amazon issuance evidence.
-11. Bundled orders show only the actual returned product(s) and item/return-specific expected refund amounts.
-12. Two separate returns under one Amazon Order ID remain separate records.
-13. Per-order `Refresh` opens an inactive detail tab, updates rendered detail/return state, and closes the tab.
-14. All rows remain symmetric with four side-by-side actions and no horizontal order-container scrolling.
-15. Needs Review total equals the expected-refund sum of currently flagged return records.
+After v0.18 merge/main CI:
+
+1. verify `dev-v0.18.0` contains the extension ZIP, SHA sidecar, and updater ZIP,
+2. run the one-time Windows bootstrap,
+3. load the fixed `current` directory once and verify the fixed extension ID/version,
+4. verify normal extension operation with no update available,
+5. later merge a strictly newer test version,
+6. do not manually copy/reload files,
+7. verify the host installs the newer verified package and Chrome reloads automatically,
+8. verify `previous` contains the prior build and current functionality remains healthy.
+
+Issue #10 stays open until that real two-version path passes.
 
 ## Security / privacy
 
-Never commit real Amazon exports, Order IDs used as private fixtures, addresses, authentication/session data, payment numbers, bank data, reconciliation request/result files, or real Teach Mode logs.
+Never commit real Amazon exports, private Order IDs used as fixtures, addresses, authentication/session data, payment numbers, bank data, reconciliation request/result files, real Teach Mode logs, native-host secrets, or private signing keys.
 
-Do not add CAPTCHA bypass, stealth/anti-detection behavior, cookie/password harvesting, or bank credentials.
+Do not add CAPTCHA bypass, stealth/anti-detection behavior, cookie/password harvesting, bank credentials, or remote-code execution inside the extension updater.
 
 ## Recovery
 
-The historical exact v0.16.0 packaged ZIP remains archived at `source-snapshots/v0.16.0/full/` with documented SHA-256:
+The historical exact v0.16.0 package remains archived under `source-snapshots/v0.16.0/full/` with SHA-256:
 
 `0ac308d98a4acf47fff51f5fd63410a9e9dc8e6105e7d6f17dcebd9b6e71ac42`
 
-It is recovery/audit material only. Do not replace the complete v0.17 root tree with v0.16 unless the current root is proven corrupt and the rollback is intentional.
+It is recovery/audit material only. Do not replace the complete v0.18 root with v0.16 unless current root is proven corrupt and rollback is intentional.

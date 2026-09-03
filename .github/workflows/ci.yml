@@ -6,6 +6,9 @@ on:
     tags: ['v*']
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   test-and-package:
     runs-on: ubuntu-latest
@@ -18,24 +21,67 @@ jobs:
         id: source
         shell: bash
         run: |
-          if [[ -f background.js && -f parser.js && -f storage.js && -f content.js ]]; then
+          if [[ -f background.js && -f parser.js && -f storage.js && -f content.js && -f service-worker.js && -f dev-updater.js ]]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Source files have not been imported into the repository yet. See PROJECT_HANDOFF.md."
+            echo "Required extension source files are missing. See PROJECT_HANDOFF.md."
+            exit 1
           fi
       - name: Run regression tests
         if: steps.source.outputs.ready == 'true'
         run: npm test
-      - name: Build installable ZIP
+      - name: Build installable ZIP and checksum
         if: steps.source.outputs.ready == 'true'
+        shell: bash
         run: |
           mkdir -p dist/amazon-order-manager
-          cp manifest.json background.js content.js parser.js storage.js dashboard.html dashboard.js popup.html popup.js ui.css workflow-recorder.js BANK_RECONCILIATION_PROMPT.txt BANK_RECONCILIATION_SCHEMA.json README.md dist/amazon-order-manager/
-          cd dist
-          zip -r amazon-order-manager.zip amazon-order-manager
+          cp manifest.json service-worker.js background.js dev-updater.js content.js parser.js storage.js dashboard.html dashboard.js popup.html popup.js ui.css workflow-recorder.js BANK_RECONCILIATION_PROMPT.txt BANK_RECONCILIATION_SCHEMA.json README.md dist/amazon-order-manager/
+          (
+            cd dist
+            zip -r amazon-order-manager.zip amazon-order-manager
+            sha256sum amazon-order-manager.zip > amazon-order-manager.zip.sha256
+          )
+      - name: Build one-time Windows dev updater package
+        if: steps.source.outputs.ready == 'true'
+        shell: bash
+        run: |
+          mkdir -p dist/amazon-order-manager-dev-updater
+          cp tools/dev-updater/Install.ps1 tools/dev-updater/NativeHost.cs tools/dev-updater/README.md dist/amazon-order-manager-dev-updater/
+          (
+            cd dist
+            zip -r amazon-order-manager-dev-updater.zip amazon-order-manager-dev-updater
+          )
       - uses: actions/upload-artifact@v4
         if: steps.source.outputs.ready == 'true'
         with:
           name: amazon-order-manager-${{ github.sha }}
-          path: dist/amazon-order-manager.zip
+          path: |
+            dist/amazon-order-manager.zip
+            dist/amazon-order-manager.zip.sha256
+            dist/amazon-order-manager-dev-updater.zip
+      - name: Publish verified development prerelease
+        if: steps.source.outputs.ready == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          TAG="dev-v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            EXISTING_TARGET=$(gh release view "$TAG" --json targetCommitish --jq .targetCommitish)
+            if [[ "$EXISTING_TARGET" == "$GITHUB_SHA" ]]; then
+              echo "Development release $TAG already exists for this commit; treating workflow rerun as success."
+              exit 0
+            fi
+            echo "::error::Development release $TAG already exists for a different commit. Bump manifest/package version before merging another user-testable build."
+            exit 1
+          fi
+          gh release create "$TAG" \
+            dist/amazon-order-manager.zip \
+            dist/amazon-order-manager.zip.sha256 \
+            dist/amazon-order-manager-dev-updater.zip \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Amazon Order Manager dev v${VERSION}" \
+            --notes "Verified development build produced from main after npm test. Use the Windows updater package once; subsequent dev-v releases install automatically through the registered native host."
