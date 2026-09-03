@@ -1,0 +1,38 @@
+name: Apply v0.18.2 final correctness polish
+
+on:
+  push:
+    branches: [v0182-multireturn-updater-reliability]
+    paths:
+      - tools/apply_v0182_final_polish.py
+      - .github/workflows/apply-v0182-final-polish.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0182-multireturn-updater-reliability
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Apply final polish
+        run: python3 tools/apply_v0182_final_polish.py
+      - name: Run full regression suite
+        run: |
+          node --check storage.js
+          node --check dashboard.js
+          npm test
+      - name: Commit durable polish and remove temporary machinery
+        shell: bash
+        run: |
+          rm -f tools/apply_v0182_final_polish.py .github/workflows/apply-v0182-final-polish.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Finalize v0.18.2 return accounting and trusted identity [v0182-polish]"
+          git push origin HEAD:v0182-multireturn-updater-reliability
