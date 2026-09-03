@@ -4,9 +4,17 @@
 
 Chrome Manifest V3 Amazon / Amazon Business Order Manager and Refund Ledger.
 
-**Current source baseline: v0.18.0 after PR #11 merges.** Root source remains the active development source. The exact pre-GitHub v0.16.0 archive under `source-snapshots/v0.16.0/full/` is historical recovery material only.
+**Current source baseline: v0.18.1 after PR #12 merges.** Root source remains the active development source. The exact pre-GitHub v0.16.0 archive under `source-snapshots/v0.16.0/full/` is historical recovery material only.
 
 v0.18 preserves the complete v0.17 Amazon crawler/details/returns/dashboard contract and adds a verified Windows development auto-update channel.
+
+## v0.18.1 live payment-card regression fix
+
+Live Amazon Business testing of v0.18.0 exposed repeated incorrect `Card •••• 1000` values across unrelated orders. The root cause was generic DOM selectors whose id/class/data-testid contained `card`; Amazon uses `card` for non-payment layout components, so unrelated masked values could contaminate payment evidence.
+
+v0.18.1 changes the invariant to: card last-four is accepted only from payment/refund-method-specific evidence and must be directly tied to a recognized payment-card instrument or an immediately masked value under an explicit Payment/Refund method heading. Gift-card/generic masked values are rejected. Provisional return records inherit the already-scoped canonical order card value rather than reparsing broad order context.
+
+`payment-evidence-test.js` reproduces the false `1000` case and protects legitimate Visa/Mastercard/refund-method parsing. Because development version changes intentionally reset the ledger, the v0.18.1 auto-update starts with clean state so stale v0.18.0 card values do not survive the retest.
 
 Two live-validation tracks remain separate:
 
