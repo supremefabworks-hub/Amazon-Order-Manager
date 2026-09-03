@@ -69,7 +69,12 @@ jobs:
           VERSION=$(node -p "require('./manifest.json').version")
           TAG="dev-v${VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::Development release $TAG already exists. Bump manifest/package version before merging another user-testable build."
+            EXISTING_TARGET=$(gh release view "$TAG" --json targetCommitish --jq .targetCommitish)
+            if [[ "$EXISTING_TARGET" == "$GITHUB_SHA" ]]; then
+              echo "Development release $TAG already exists for this commit; treating workflow rerun as success."
+              exit 0
+            fi
+            echo "::error::Development release $TAG already exists for a different commit. Bump manifest/package version before merging another user-testable build."
             exit 1
           fi
           gh release create "$TAG" \
