@@ -9,6 +9,7 @@ def once(text,old,new,label):
     if count!=1: raise RuntimeError(f'{label}: expected 1 match, got {count}')
     return text.replace(old,new,1)
 
+# ---------------- canonical order refund + trust source ----------------
 p=read('parser.js')
 anchor='''  function findRefundAmount(text) {
     const direct = findLabeledMoney(text, [
@@ -32,6 +33,12 @@ p=once(p,
         record.canonicalRefundTotal = canonicalRefundTotal != null && Number.isFinite(Number(canonicalRefundTotal)) ? Number(canonicalRefundTotal) : null;''',
 'canonical refund assignment')
 p=once(p,
+'''        itemIdentitySource: (evidence.itemNames.length || evidence.asins.length) ? 'order-detail-return-link' : null''',
+'''        itemIdentitySource: (evidence.itemNames.length || evidence.asins.length)
+          ? (isOrderDetailPage(baseUrl) ? 'order-detail-return-link' : 'return-link')
+          : null''',
+'only Order Details gets trusted return-link identity')
+p=once(p,
 '''    findRefundAmount,
     findCardLast4,''',
 '''    findRefundAmount,
@@ -40,7 +47,7 @@ p=once(p,
 'parser export canonical refund')
 write('parser.js',p)
 
-# Add functional canonical refund regressions to parser-test.
+# ---------------- parser regressions ----------------
 t=read('parser-test.js')
 needle="assert(!detailWithRelated.records.some(x => x.orderId === '114-9999999-8888888'), 'related order IDs should not become records on a targeted detail page');\nconsole.log('authoritative detail-page tests passed');"
 replacement="""assert(!detailWithRelated.records.some(x => x.orderId === '114-9999999-8888888'), 'related order IDs should not become records on a targeted detail page');
@@ -53,7 +60,7 @@ const canonicalRefundDoc = {
 const canonicalRefundParsed = p.parseDocument(canonicalRefundDoc, 'https://www.amazon.com/your-orders/order-details?orderID=113-5152372-1721052');
 const canonicalRefundOrder = canonicalRefundParsed.records.find(x => x.recordType === 'order');
 assert(canonicalRefundOrder.canonicalRefundTotal === 185.46, 'Order Details Refund Total must become the canonical order-level refund total');
-assert(p.findOrderRefundTotal('Order Total $262.86\nRefund Total $185.46') === 185.46, 'canonical Refund Total helper must parse the explicit label');
+assert(p.findOrderRefundTotal(`Order Total $262.86\nRefund Total $185.46`) === 185.46, 'canonical Refund Total helper must parse the explicit label');
 
 const proseRefundDoc = {
   title: 'Order Details',
@@ -64,12 +71,12 @@ const proseRefundParsed = p.parseDocument(proseRefundDoc, 'https://www.amazon.co
 const proseRefundOrder = proseRefundParsed.records.find(x => x.recordType === 'order');
 assert(proseRefundOrder.refundAmount === 88, 'generic refund parser should still retain lifecycle refund evidence where applicable');
 assert(proseRefundOrder.canonicalRefundTotal == null, 'refund lifecycle prose must not become canonical Order Details Refund Total');
-assert(p.findOrderRefundTotal('Your refund has been issued $88.00') === null, 'canonical helper must reject refund lifecycle prose');
+assert(p.findOrderRefundTotal(`Your refund has been issued $88.00`) === null, 'canonical helper must reject refund lifecycle prose');
 console.log('authoritative detail-page tests passed');"""
 t=once(t,needle,replacement,'parser canonical refund regression')
 write('parser-test.js',t)
 
-# The dashboard/popup must never fall back from canonical Refund Total to generic order refund prose.
+# ---------------- canonical refund display ----------------
 d=read('dashboard.js')
 d=once(d,
 '''      const canonicalRefundCandidate = order?.canonicalRefundTotal ?? (order?.detailScanComplete ? order?.refundAmount : null);''',
@@ -87,7 +94,69 @@ pj=once(pj,
 'popup canonical-only refund')
 write('popup.js',pj)
 
-# Remove unsupported PowerShell 7 null-coalescing syntax from Windows PowerShell 5.1 installer.
+# ---------------- stable return identity across return-page redirects ----------------
+c=read('content.js')
+helper='''
+  function applySingleReturnIdentityHint(records, hint) {
+    const list = Array.isArray(records) ? records.slice() : [];
+    const authoritative = list.filter(record => record?.recordType === 'return' && record?.authoritativeReturnCapture);
+    if (authoritative.length !== 1 || !hint?.returnItemId) return list;
+    const target = authoritative[0];
+    const enriched = {
+      ...target,
+      returnToken: hint.returnToken || target.returnToken || null,
+      returnItemId: hint.returnItemId,
+      returnContractId: hint.returnContractId || target.returnContractId || null,
+      returnRmaId: hint.returnRmaId || target.returnRmaId || null
+    };
+    enriched.recordId = parser.makeRecordId(enriched);
+    return list.map(record => record === target ? enriched : record);
+  }
+
+'''
+marker='  async function announceDiscovery(result) {'
+if marker not in c: raise RuntimeError('content announce marker missing')
+c=c.replace(marker,helper+marker,1)
+
+c=once(c,
+'''        return scanPage({ force: true, notify: false, discover: false, reportChange: false });''',
+'''        const scanned = await scanPage({ force: true, notify: false, discover: false, reportChange: false });
+        if (message.job?.type === 'return' && scanned?.ok) {
+          const stabilizedRecords = applySingleReturnIdentityHint(scanned.records || [], message.job);
+          if (stabilizedRecords.some((record, index) => record?.recordId !== scanned.records?.[index]?.recordId)) {
+            const stabilizedReturns = stabilizedRecords.filter(record => record?.recordType === 'return' && record?.authoritativeReturnCapture);
+            const stabilizedSave = stabilizedReturns.length ? await storage.upsertRecords(stabilizedReturns) : scanned.save;
+            return { ...scanned, records: stabilizedRecords, save: stabilizedSave };
+          }
+        }
+        return scanned;''',
+'worker rendered return identity stabilization')
+
+c=once(c,
+'''            const returnRecords = (returnParsed.records || []).filter(record => record?.recordType === 'return' && record?.orderId === orderId && record?.authoritativeReturnCapture);
+            if (!returnRecords.length) return { ok: false, error: `Return status for ${orderId} did not contain an authoritative return record.` };
+            const returnSave = await storage.upsertRecords(returnRecords);''',
+'''            let returnRecords = (returnParsed.records || []).filter(record => record?.recordType === 'return' && record?.orderId === orderId && record?.authoritativeReturnCapture);
+            returnRecords = applySingleReturnIdentityHint(returnRecords, link).filter(record => record?.recordType === 'return' && record?.authoritativeReturnCapture);
+            if (!returnRecords.length) return { ok: false, error: `Return status for ${orderId} did not contain an authoritative return record.` };
+            const returnSave = await storage.upsertRecords(returnRecords);''',
+'authenticated return fetch identity stabilization')
+write('content.js',c)
+
+b=read('background.js')
+b=once(b,
+'''      const returnResult = await scanWorkerTab(tabId, { type: 'return', manualRefresh: true, orderId: id, url: link.url });''',
+'''      const returnResult = await scanWorkerTab(tabId, {
+        type: 'return', manualRefresh: true, orderId: id, url: link.url,
+        returnToken: link.returnToken || null,
+        returnItemId: link.returnItemId || null,
+        returnContractId: link.returnContractId || null,
+        returnRmaId: link.returnRmaId || null
+      });''',
+'manual rendered return identity hint')
+write('background.js',b)
+
+# ---------------- Windows PowerShell 5.1 diagnostics ----------------
 ins=read('tools/dev-updater/Install.ps1')
 ins=once(ins,
 '''    Write-Host "Registry manifest: $($registered ?? '(missing)')"''',
@@ -107,8 +176,8 @@ write('updater-reliability-test.js',u)
 ui=read('ui-test.js')
 ui=once(ui,
 "assert(dashboard.includes('canonicalRefundTotal'), 'dashboard must prefer canonical Order Details Refund Total');",
-"assert(dashboard.includes('canonicalRefundTotal'), 'dashboard must prefer canonical Order Details Refund Total');\nassert(!dashboard.includes('order?.detailScanComplete ? order?.refundAmount'), 'dashboard must never use generic order refund prose as canonical Refund Total');",
-'UI canonical-only regression')
+"assert(dashboard.includes('canonicalRefundTotal'), 'dashboard must prefer canonical Order Details Refund Total');\nassert(!dashboard.includes('order?.detailScanComplete ? order?.refundAmount'), 'dashboard must never use generic order refund prose as canonical Refund Total');\nassert(content.includes('applySingleReturnIdentityHint'), 'return-page refresh must preserve exact Order Details itemId identity across redirects');\nassert(background.includes('returnItemId: link.returnItemId'), 'rendered per-order Refresh must pass exact return item identity to the worker scan');",
+'UI/refresh identity regression')
 write('ui-test.js',ui)
 
 print('v0.18.2 review hardening applied')
