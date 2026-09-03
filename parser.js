@@ -1151,12 +1151,15 @@
 
       if (pageType === 'return') {
         const returnItems = extractReturnItemEntries(container || doc?.body);
-        const groupRefundAmount = Number.isFinite(Number(record.refundAmount ?? record.refundSubtotal))
-          ? Number(record.refundAmount ?? record.refundSubtotal)
-          : null;
+        const groupRefundRaw = record.refundAmount ?? record.refundSubtotal;
+        const groupRefundAmount = groupRefundRaw === null || groupRefundRaw === undefined || groupRefundRaw === ''
+          ? null
+          : (Number.isFinite(Number(groupRefundRaw)) ? Number(groupRefundRaw) : null);
         if (returnItems.length) {
           for (const item of returnItems) {
-            const itemRefund = Number.isFinite(Number(item.refundAmount)) ? Number(item.refundAmount) : null;
+            const itemRefund = item.refundAmount === null || item.refundAmount === undefined || item.refundAmount === ''
+              ? null
+              : (Number.isFinite(Number(item.refundAmount)) ? Number(item.refundAmount) : null);
             const singleItemGroup = returnItems.length === 1;
             const scopedRefund = itemRefund ?? (singleItemGroup ? groupRefundAmount : null);
             const itemRecord = {

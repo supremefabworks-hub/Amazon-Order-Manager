@@ -51,4 +51,19 @@ assert(p.makeRecordId(provisional) !== p.makeRecordId(sibling), 'different itemI
 
 const meta = p.returnUrlMetadata(`https://www.amazon.com/spr/returns/prep?orderId=${orderId}&contractId=contract-x&rmaId=RMA-X&itemId=item-x`);
 assert(meta.returnToken === 'RMA-X' && meta.returnItemId === 'item-x' && meta.returnContractId === 'contract-x' && meta.returnRmaId === 'RMA-X', 'return URL metadata must preserve Amazon return identity');
+
+const noMoneyText = `Order # ${orderId}
+Return summary
+Return initiated
+Returned Hydraulic Hose
+Quantity: 1`;
+const noMoneyDoc = {
+  title: 'Online Return Center',
+  body: { innerText: noMoneyText, textContent: noMoneyText },
+  querySelectorAll() { return []; }, querySelector() { return null; }
+};
+const noMoneyParsed = p.parseDocument(noMoneyDoc, `https://www.amazon.com/spr/returns/prep?orderId=${orderId}&rmaId=RMA-NO-MONEY&itemId=item-no-money`);
+const noMoneyReturn = noMoneyParsed.records.find(record => record.recordType === 'return');
+assert(noMoneyReturn && noMoneyReturn.refundAmount == null, 'return with no proven refund money must keep refundAmount unknown');
+assert(noMoneyReturn.returnGroupRefundAmount == null, 'return with no proven refund money must keep group refund unknown instead of zero');
 console.log('multi-return identity tests passed');
