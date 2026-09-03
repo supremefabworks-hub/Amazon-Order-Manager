@@ -2,27 +2,29 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current baseline:** v0.16.0. This repository is the source of truth. A new development session should read `AGENTS.md` and `PROJECT_HANDOFF.md` before changing crawler, parser, return-state, card, or reconciliation logic.
+**Current baseline:** v0.16.0. This repository is now the source of truth. A new development session should read `AGENTS.md` and `PROJECT_HANDOFF.md` before changing crawler, parser, return-state, card, UI, or reconciliation logic.
 
-## Resume development in a new chat
+## Resume development
 
-1. Open this repository and read `PROJECT_HANDOFF.md`.
-2. Review open Issues #2–#6 for the v0.17 implementation backlog.
-3. If the active source is incomplete, restore the exact v0.16.0 build from `source-snapshots/v0.16.0/` using its `RESTORE.md` instructions. The reconstructed ZIP must have SHA-256 `0ac308d98a4acf47fff51f5fd63410a9e9dc8e6105e7d6f17dcebd9b6e71ac42` and size 77,670 bytes.
-4. Expand the restored source into the repository root as tracked by Issue #1, then run `npm test`.
-5. Continue as v0.17.0; during active development, version changes should wipe the local extension ledger/crawl state so each build starts clean.
+1. Read `PROJECT_HANDOFF.md` for the architecture, Amazon Business pagination findings, known defects, privacy constraints, and acceptance tests.
+2. Use **Issue #7 — v0.17 authoritative details, return refresh, crawler and UI fixes** as the primary active implementation checklist.
+3. The exact pre-GitHub v0.16.0 extension ZIP is archived under `source-snapshots/v0.16.0/full/`. Reconstruct it using that directory's README if a known-good baseline is needed.
+4. Snapshot integrity: SHA-256 `0ac308d98a4acf47fff51f5fd63410a9e9dc8e6105e7d6f17dcebd9b6e71ac42`, size `77,670` bytes.
+5. New development should keep ordinary editable source files at repository root and continue as v0.17.0.
+6. During active development, version changes should wipe local extension ledger/crawl state so every build starts clean. Disable that destructive policy before a production release.
 
 ## Development workflow
 
-Clone this repository once, load the repository root with Chrome **Load unpacked**, then pull changes and click **Reload** in `chrome://extensions`. CI is configured to run the regression suite and package an installable ZIP once the full active source is present at the repository root.
+Clone this repository once and load the repository root with Chrome **Load unpacked** once the active source tree is complete. Thereafter, pull changes and click **Reload** in `chrome://extensions`. CI is configured to run the regression suite and package an installable ZIP once the full active source is present at repository root.
 
 ## Current architecture
 
-- Scan Amazon/Amazon Business order-history pages year by year.
-- Finish every page in a year before switching to the next older year.
-- Capture real `View order details` links; Order Details is the canonical order record.
-- Use real return-status links only as secondary lifecycle enrichment for actual returns.
-- Keep one canonical order record per Amazon Order ID with item-level return records.
+- Scan Amazon/Amazon Business order history year by year.
+- Finish every page in the current year before switching to the next older year.
+- A page is accepted only when its visible Order-ID fingerprint differs from the prior page.
+- Capture real **View order details** links; Order Details is the canonical order record.
+- Use real `/spr/returns/prep` links only as secondary lifecycle enrichment for an actual return on that same Order ID.
+- Keep one canonical order record per Amazon Order ID with item-level return information.
 - Reconcile issued refunds through a narrow import/export bridge so bank credentials never enter the extension.
 
 ## Important Amazon Business finding
@@ -31,6 +33,16 @@ The tested Amazon Business UI uses client-side history routes such as:
 
 `#time/2026/pagination/1/` → `#time/2026/pagination/2/` → `#time/2026/pagination/3/`
 
-Do not assume that `?timeFilter=year-YYYY&startIndex=N` will advance this UI; it has been observed to serve the first page again. A history page counts only after the visible Order-ID fingerprint changes.
+Do not assume that `?timeFilter=year-YYYY&startIndex=N` will advance this UI; it has been observed to serve the first page again. Prefer the actual numbered pager/Next control and verify a different Order-ID fingerprint before advancing crawler state.
 
-See `PROJECT_HANDOFF.md` for the full implementation requirements, known bugs, privacy constraints, and acceptance tests.
+## Immediate v0.17 priorities
+
+- Scope payment-card last-four extraction to the actual payment-method section; never accept an arbitrary four-digit token.
+- Make `Detailed` mean a complete successful Order Details parse.
+- Add per-order **Refresh** using an inactive background Order Details tab.
+- Refresh real return lifecycle status from the return-status link exposed by Order Details.
+- Prevent false `Refund issued` classifications and preserve monotonic return state.
+- Standardize every ledger row to one compact symmetric grid; enlarge Details / Credit / Reset / Refresh and keep them side-by-side.
+- Preserve exact year/page/order crawl checkpoints and treat overlapping Order IDs as overlap evidence, not duplicate orders.
+
+See `PROJECT_HANDOFF.md` and Issue #7 before implementing the next build.
