@@ -20,23 +20,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Fix patch runner escaping
-        shell: bash
-        run: |
-          sed -i 's/re.subn(pattern, repl, text/re.subn(pattern, lambda _m: repl, text/' .github/scripts/patch_v017.py
-      - name: Apply v0.17 patch
-        run: python3 .github/scripts/patch_v017.py
-      - name: Update legacy tests for v0.17 contract
-        run: python3 .github/scripts/patch_v017_followup.py
+      - name: Apply release-review hardening
+        run: python3 .github/scripts/hotfix_v017_review.py
       - name: Run full regression suite
         run: npm test
-      - name: Commit candidate to branch
+      - name: Commit hardened candidate to branch
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add manifest.json package.json parser.js storage.js background.js content.js dashboard.js ui.css parser-test.js storage-test.js background-test.js state-machine-test.js ui-test.js
+          git add parser.js background.js parser-test.js state-machine-test.js
           git status --short
-          git commit -m 'Implement v0.17 authoritative crawl and return fixes'
+          git commit -m 'Harden v0.17 payment scope and upgrade reset'
           git push origin HEAD:v017-issue7
