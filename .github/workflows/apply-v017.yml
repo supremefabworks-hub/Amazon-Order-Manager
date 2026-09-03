@@ -20,6 +20,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Fix patch runner escaping
+        run: sed -i 's/re.subn(pattern, repl, text/re.subn(pattern, lambda _m: repl, text/' .github/scripts/patch_v017.py
       - name: Apply v0.17 patch
         run: python3 .github/scripts/patch_v017.py
       - name: Run full regression suite
