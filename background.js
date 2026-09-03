@@ -30,11 +30,11 @@ let workflowRecorderEnabled = false;
 let processing = false;
 let workerTabId = null;
 
-async function ensureDevelopmentVersionState() {
+async function ensureDevelopmentVersionState(previousVersionHint = null) {
   const version = chrome.runtime?.getManifest?.()?.version || null;
   if (!version) return { changed: false, version: null };
   const data = await chrome.storage.local.get([VERSION_KEY]);
-  const prior = data[VERSION_KEY] || null;
+  const prior = data[VERSION_KEY] || previousVersionHint || null;
   if (prior === version) return { changed: false, version };
   if (DEV_RESET_ON_VERSION_CHANGE && prior) {
     await chrome.storage.local.remove([
@@ -1385,4 +1385,4 @@ chrome.tabs.onRemoved.addListener(tabId => {
 chrome.runtime.onStartup.addListener(() => {
   ensureDevelopmentVersionState().then(() => getState()).then(state => { if (state.crawl?.active && !state.paused && state.queue?.length) scheduleSoon(randomBetween(1200, 3000)); }).catch(() => {});
 });
-chrome.runtime.onInstalled.addListener(() => { ensureDevelopmentVersionState().catch(() => {}); });
+chrome.runtime.onInstalled.addListener(details => { ensureDevelopmentVersionState(details?.previousVersion || null).catch(() => {}); });

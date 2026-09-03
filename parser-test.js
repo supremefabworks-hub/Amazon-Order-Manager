@@ -438,6 +438,15 @@ const unrelatedDigits = p.parseTextRecord('Order # 114-1234567-7654321 Tracking 
 assert(unrelatedDigits.cardLast4 === null, 'arbitrary four-digit page text must never become a payment card');
 const semanticPayment = p.parseTextRecord('Payment information\nVisa ending in 4821\nOrder total $19.99', '114-1234567-7654321', { pageType: 'order' });
 assert(semanticPayment.cardLast4 === '4821', 'semantic payment evidence should capture card last four');
+const unrelatedCardDoc = {
+  title: 'Order Details',
+  body: { innerText: 'Order placed Sep 2, 2026\nOrder # 114-1234567-7654321\nOrder Total: $19.99\nExample item\nQuantity: 1\nOld receipt note: Visa ending in 4821', textContent: '' },
+  querySelectorAll() { return []; },
+  querySelector() { return null; }
+};
+const unrelatedCardParsed = p.parseDocument(unrelatedCardDoc, 'https://www.amazon.com/your-orders/order-details?orderID=114-1234567-7654321');
+const unrelatedCardOrder = unrelatedCardParsed.records.find(record => record.recordType === 'order');
+assert(unrelatedCardOrder.cardLast4 === null, 'document parsing must not accept last four outside payment-method evidence');
 
 const noDetailAnchorDoc = {
   body: { innerText: 'Your Orders\nOrder placed\nOrder # 114-8888888-9999999', textContent: '' },

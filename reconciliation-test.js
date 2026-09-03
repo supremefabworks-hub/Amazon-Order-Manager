@@ -1,7 +1,7 @@
 const fs = require('fs');
 
 const manifest = JSON.parse(fs.readFileSync(__dirname + '/manifest.json', 'utf8'));
-if (manifest.version !== '0.16.0') throw new Error('manifest version mismatch');
+if (manifest.version !== '0.17.0') throw new Error('manifest version mismatch');
 
 const dashboard = fs.readFileSync(__dirname + '/dashboard.js', 'utf8');
 for (const token of [

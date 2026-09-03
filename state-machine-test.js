@@ -75,5 +75,12 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
   assert(store.backgroundScanState === undefined, 'version change should wipe crawl checkpoint state');
   assert(store.installedExtensionVersion === '0.17.0', 'version reset should store new manifest version');
 
+  delete store.installedExtensionVersion;
+  store.ledger = [{ recordId:'order:legacy', orderId:'113-1111111-1111111' }];
+  store.backgroundScanState = { running:true };
+  await sandbox.ensureDevelopmentVersionState('0.16.0');
+  assert(store.ledger === undefined && store.backgroundScanState === undefined, 'upgrade previousVersion must wipe legacy state even before VERSION_KEY existed');
+  assert(store.installedExtensionVersion === '0.17.0', 'legacy upgrade reset should persist v0.17 version key');
+
   console.log('strict crawl state-machine tests passed');
 })().catch(err => { console.error(err); process.exit(1); });

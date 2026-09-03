@@ -87,7 +87,7 @@
   }
 
   function extractPaymentEvidenceText(container) {
-    if (!container?.querySelectorAll) return '';
+    if (!container) return '';
     const chunks = [];
     const seen = new Set();
     const add = raw => {
@@ -105,6 +105,13 @@
       try {
         for (const el of Array.from(container.querySelectorAll(selector))) add(el.innerText || el.textContent || '');
       } catch (_) {}
+    }
+    if (!chunks.length) {
+      const lines = normalizeText(container.innerText || container.textContent || '').split('\n').map(line => line.trim()).filter(Boolean);
+      for (let i = 0; i < lines.length; i += 1) {
+        if (!/payment\s+(?:method|information)/i.test(lines[i])) continue;
+        add(lines.slice(i, i + 5).join(' '));
+      }
     }
     return chunks.join('\n');
   }
@@ -447,7 +454,7 @@
     const refundAmount = findRefundAmount(text);
     const refundSubtotal = findLabeledMoney(text, ['Refund subtotal']);
     const purchaseAmount = findOrderTotal(text);
-    const cardLast4 = findCardLast4(options.paymentText || text);
+    const cardLast4 = Object.prototype.hasOwnProperty.call(options, 'paymentText') ? findCardLast4(options.paymentText) : findCardLast4(text);
     const orderDate = findDateAfterLabel(text, ['Order placed', 'Order date']);
     const returnDate = findDateAfterLabel(text, ['Return initiated', 'Return started', 'Returned on', 'Drop off by', 'Dropoff by']);
     const recordType = options.forceRecordType || (pageType === 'return' ? 'return' : 'order');
@@ -1002,7 +1009,7 @@
       const paymentEvidenceText = extractPaymentEvidenceText(container || doc?.body);
       const record = parseTextRecord(context, orderId, {
         pageType,
-        paymentText: paymentEvidenceText || context,
+        paymentText: paymentEvidenceText,
         returnToken,
         returnStatusUrl: pageType === 'return' ? url : null,
         url,
