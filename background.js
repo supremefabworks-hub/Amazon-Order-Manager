@@ -22,11 +22,30 @@ const RATE_LIMIT_COOLDOWN_MAX_MS = 20 * 60 * 1000;
 const LOAD_TIMEOUT_MS = 45000;
 const MAX_RECENT_KEYS = 6000;
 const WORKFLOW_LOG_KEY = 'workflowLog';
+const VERSION_KEY = 'installedExtensionVersion';
+const DEV_RESET_ON_VERSION_CHANGE = true;
 const MAX_WORKFLOW_EVENTS = 1600;
 let workflowRecorderEnabled = false;
 
 let processing = false;
 let workerTabId = null;
+
+async function ensureDevelopmentVersionState() {
+  const version = chrome.runtime?.getManifest?.()?.version || null;
+  if (!version) return { changed: false, version: null };
+  const data = await chrome.storage.local.get([VERSION_KEY]);
+  const prior = data[VERSION_KEY] || null;
+  if (prior === version) return { changed: false, version };
+  if (DEV_RESET_ON_VERSION_CHANGE && prior) {
+    await chrome.storage.local.remove([
+      LEDGER_KEY, STATE_KEY, WORKER_TAB_KEY, WORKFLOW_LOG_KEY,
+      'lastBankVerificationRequest', 'lastBankVerificationImport'
+    ]);
+    workerTabId = null;
+  }
+  await chrome.storage.local.set({ [VERSION_KEY]: version });
+  return { changed: Boolean(prior && prior !== version), previousVersion: prior, version };
+}
 
 function randomBetween(min, max) {
   return Math.floor(min + Math.random() * Math.max(1, max - min + 1));
@@ -230,20 +249,13 @@ function historyPageIndexFromUrl(value) {
   return historyRouteFromUrl(value).page;
 }
 
-function syntheticDetailUrl(record) {
-  const orderId = String(record?.orderId || '').trim();
-  if (!/^\d{3}-\d{7}-\d{7}$/.test(orderId)) return null;
-  // Match the current Amazon "View order details" route. Discovered real links always take
-  // precedence; this exists only to recover an index-only order whose anchor was hidden.
-  return `https://www.amazon.com/your-orders/order-details?orderID=${encodeURIComponent(orderId)}`;
-}
 
 async function seedKnownOrderDetails() {
   const data = await chrome.storage.local.get([LEDGER_KEY]);
   const ledger = Array.isArray(data[LEDGER_KEY]) ? data[LEDGER_KEY] : [];
   const detailLinks = ledger
     .filter(r => r?.recordType === 'order' && r?.orderId && !r?.detailScanComplete)
-    .map(r => ({ orderId: r.orderId, url: r.orderDetailsUrl || syntheticDetailUrl(r) }))
+    .map(r => ({ orderId: r.orderId, url: r.orderDetailsUrl || null }))
     .filter(r => r.url);
   const returnLinks = ledger
     .filter(r => r?.recordType === 'return' && r?.orderId && r?.returnStatusUrl)
@@ -375,13 +387,12 @@ function uniqueDetailLinks(result) {
   const byId = new Map();
   for (const link of result?.detailLinks || []) {
     const orderId = String(link?.orderId || '').trim();
-    if (!/^\d{3}-\d{7}-\d{7}$/.test(orderId) || byId.has(orderId)) continue;
-    byId.set(orderId, { orderId, url: link.url || syntheticDetailUrl({ orderId }) });
+    const url = normalizeUrl(link?.url) || link?.url || null;
+    if (!/^\d{3}-\d{7}-\d{7}$/.test(orderId) || !url || byId.has(orderId)) continue;
+    if (!/(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|order-details)/i.test(url)) continue;
+    byId.set(orderId, { orderId, url });
   }
-  for (const orderId of result?.historyOrderIds || []) {
-    if (!byId.has(orderId)) byId.set(orderId, { orderId, url: syntheticDetailUrl({ orderId }) });
-  }
-  return Array.from(byId.values()).filter(x => x.url);
+  return Array.from(byId.values());
 }
 
 async function queueManagedHistoryResult(result, job) {
@@ -401,7 +412,12 @@ async function queueManagedHistoryResult(result, job) {
   crawl.phase = 'details';
 
   const links = uniqueDetailLinks(result);
-  const pageOrderIds = links.map(x => x.orderId);
+  const pageOrderIds = historyOrderIdSet(result);
+  if (!pageOrderIds.length) throw new Error(`No visible Amazon Order IDs were found on ${year} page ${page}`);
+  const linkByOrder = new Map(links.map(link => [link.orderId, link]));
+  const missingDetailUrls = pageOrderIds.filter(orderId => !linkByOrder.has(orderId));
+  if (missingDetailUrls.length) throw new Error(`Missing real View order details URL for ${missingDetailUrls.length} order(s) on ${year} page ${page}. The crawler stopped rather than inventing canonical URLs.`);
+  const orderedLinks = pageOrderIds.map(orderId => linkByOrder.get(orderId));
   crawl.currentPageOrderIds = pageOrderIds;
   crawl.currentPageCompleted = 0;
   const pageKey = `${year}:${page}`;
@@ -423,7 +439,7 @@ async function queueManagedHistoryResult(result, job) {
   const existingKeys = new Set(state.queue.map(jobKey));
   if (state.currentJob) existingKeys.add(jobKey(state.currentJob));
   let seq = 0;
-  for (const link of links) {
+  for (const link of orderedLinks) {
     seq += 1;
     // A duplicate order ID on a later history page is not detail-scanned again during the same
     // lifetime run. It is counted as overlap and the first capture remains authoritative.
@@ -800,10 +816,8 @@ function historyOrderIdSet(result) {
 function historyPageChanged(before, after) {
   const a = historyOrderIdSet(before);
   const b = historyOrderIdSet(after);
-  if (a.length && b.length) return a.join('|') !== b.join('|');
-  const au = normalizeUrl(before?.scannedUrl || '');
-  const bu = normalizeUrl(after?.scannedUrl || '');
-  return Boolean(au && bu && au !== bu);
+  if (!a.length || !b.length) return false;
+  return a.join('|') !== b.join('|');
 }
 
 async function waitForHistoryOrderIdsChange(tabId, previousResult, expectedUrl, timeoutMs = 24000) {
@@ -914,6 +928,38 @@ async function advanceHistoryPage(tabId, result, job) {
   return null;
 }
 
+async function forceRefreshOrder(orderId) {
+  const id = String(orderId || '').trim();
+  if (!/^\d{3}-\d{7}-\d{7}$/.test(id)) throw new Error('Invalid Amazon order ID.');
+  const data = await chrome.storage.local.get([LEDGER_KEY]);
+  const ledger = Array.isArray(data[LEDGER_KEY]) ? data[LEDGER_KEY] : [];
+  const order = ledger.find(r => r?.recordType === 'order' && r?.orderId === id) || null;
+  const detailUrl = order?.orderDetailsUrl || null;
+  if (!detailUrl || !/(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|order-details)/i.test(detailUrl)) {
+    throw new Error('This order has no real captured View order details URL. Refresh cannot invent one.');
+  }
+  const tab = await chrome.tabs.create({ url: detailUrl, active: false });
+  const tabId = tab?.id;
+  if (!Number.isInteger(tabId)) throw new Error('Could not create the inactive Amazon refresh tab.');
+  try {
+    await waitForTabComplete(tabId, detailUrl);
+    const detailResult = await scanWorkerTab(tabId, { type: 'detail', manualRefresh: true, orderId: id, url: detailUrl });
+    const complete = (detailResult.records || []).some(r => r?.recordType === 'order' && r?.orderId === id && r?.detailScanComplete);
+    if (!complete) throw new Error('Rendered Order Details did not produce a complete canonical capture.');
+    let returnsRefreshed = 0;
+    for (const link of (detailResult.returnLinks || []).filter(link => link?.orderId === id && link?.url && /\/spr\/returns\/prep/i.test(link.url))) {
+      await navigateExistingWorkerTab(tabId, link.url);
+      const returnResult = await scanWorkerTab(tabId, { type: 'return', manualRefresh: true, orderId: id, url: link.url });
+      const matched = (returnResult.records || []).some(r => r?.recordType === 'return' && r?.orderId === id && r?.authoritativeReturnCapture);
+      if (!matched) throw new Error('Amazon return-status page did not produce an authoritative return record.');
+      returnsRefreshed += 1;
+    }
+    return { ok: true, orderId: id, detailScannedAt: nowIso(), returnsRefreshed };
+  } finally {
+    try { await chrome.tabs.remove(tabId); } catch (_) {}
+  }
+}
+
 async function broadcastLedgerUpdate(save) {
   if (!save?.changed) return;
   const settings = await getSettings();
@@ -993,6 +1039,7 @@ async function runJob(job) {
     // Keep the worker parked on Amazon and fetch the canonical Order Details HTML through the
     // authenticated content-script context. This avoids one full browser navigation per order.
     const state = ensureCrawl(await getState());
+    if (!job.url) throw new Error('Canonical Order Details URL is missing; crawler will not synthesize one.');
     const hostUrl = job.historyUrl || state.crawl.currentHistoryUrl || 'https://www.amazon.com/gp/your-account/order-history';
     const tabId = await ensureFetchHostTab(hostUrl);
     await delay(randomBetween(150, 350));
@@ -1000,7 +1047,7 @@ async function runJob(job) {
     try {
       result = await chrome.tabs.sendMessage(tabId, {
         type: 'ARL_WORKER_FETCH_DETAIL',
-        url: job.url || syntheticDetailUrl({ orderId: job.orderId }),
+        url: job.url,
         orderId: job.orderId
       });
     } catch (error) {
@@ -1300,12 +1347,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'ARL_REFRESH_ORDER') {
+    forceRefreshOrder(message.orderId)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
   if (message.type === 'ARL_RESCAN_ALL_DETAILS') {
     chrome.storage.local.get([LEDGER_KEY]).then(async data => {
       const ledger = Array.isArray(data[LEDGER_KEY]) ? data[LEDGER_KEY] : [];
       const detailLinks = ledger
         .filter(r => r.recordType === 'order' && r.orderId)
-        .map(r => ({ orderId: r.orderId, url: r.orderDetailsUrl || syntheticDetailUrl(r) }))
+        .map(r => ({ orderId: r.orderId, url: r.orderDetailsUrl || null }))
         .filter(r => r.url);
       const state = await getState();
       for (const link of detailLinks) delete state.recent[`detail:${link.orderId}`];
@@ -1329,6 +1383,6 @@ chrome.tabs.onRemoved.addListener(tabId => {
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  getState().then(state => { if (state.crawl?.active && !state.paused && state.queue?.length) scheduleSoon(randomBetween(1200, 3000)); }).catch(() => {});
+  ensureDevelopmentVersionState().then(() => getState()).then(state => { if (state.crawl?.active && !state.paused && state.queue?.length) scheduleSoon(randomBetween(1200, 3000)); }).catch(() => {});
 });
-chrome.runtime.onInstalled.addListener(() => {});
+chrome.runtime.onInstalled.addListener(() => { ensureDevelopmentVersionState().catch(() => {}); });

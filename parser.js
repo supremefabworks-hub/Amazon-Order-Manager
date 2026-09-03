@@ -71,11 +71,42 @@
 
   function findCardLast4(text) {
     const normalized = normalizeText(text);
-    for (const pattern of CARD_PATTERNS) {
+    if (!normalized) return null;
+    const semantic = /(?:payment\s+(?:method|information)|\bcard\b|visa|master\s*card|mastercard|american express|amex|discover|amazon business card|ending in|last four|last 4)/i;
+    if (!semantic.test(normalized)) return null;
+    const patterns = [
+      /(?:visa|master\s*card|mastercard|american express|amex|discover|amazon business card)[^\d\n]{0,100}?(?:ending in|ending|last four|last 4|\*{2,}|[•·xX]{2,})\s*[:#-]?\s*(\d{4})\b/i,
+      /(?:payment\s+(?:method|information)|\bcard\b)[^\n]{0,150}?(?:ending in|ending|last four|last 4|\*{2,}|[•·xX]{2,})\s*[:#-]?\s*(\d{4})\b/i,
+      /(?:ending in|last four|last 4)\s*[:#-]?\s*(\d{4})\b/i
+    ];
+    for (const pattern of patterns) {
       const match = normalized.match(pattern);
       if (match) return match[1];
     }
     return null;
+  }
+
+  function extractPaymentEvidenceText(container) {
+    if (!container?.querySelectorAll) return '';
+    const chunks = [];
+    const seen = new Set();
+    const add = raw => {
+      const text = normalizeText(raw);
+      if (!text || !/(?:payment|card|visa|master\s*card|mastercard|american express|amex|discover|ending in|last four|last 4)/i.test(text)) return;
+      const key = text.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      chunks.push(text);
+    };
+    for (const selector of [
+      '[id*="payment" i]', '[class*="payment" i]', '[data-testid*="payment" i]', '[aria-label*="payment" i]',
+      '[id*="card" i]', '[class*="card" i]', '[data-testid*="card" i]'
+    ]) {
+      try {
+        for (const el of Array.from(container.querySelectorAll(selector))) add(el.innerText || el.textContent || '');
+      } catch (_) {}
+    }
+    return chunks.join('\n');
   }
 
   function extractOrderIds(text) {
@@ -351,6 +382,46 @@
     return asins.slice(0, 30);
   }
 
+
+  function extractReturnItemEntries(container) {
+    if (!container?.querySelectorAll) return [];
+    const candidates = [];
+    const seenElements = new Set();
+    for (const selector of ['[data-asin]', '[data-item-index]', '[class*="return-item" i]', '[class*="returnItem"]', '.a-box', '.a-section']) {
+      let nodes = [];
+      try { nodes = Array.from(container.querySelectorAll(selector)); } catch (_) {}
+      for (const el of nodes) {
+        if (!el || seenElements.has(el)) continue;
+        seenElements.add(el);
+        const text = normalizeText(el.innerText || el.textContent || '');
+        if (text.length < 8 || text.length > 3600) continue;
+        if (!/(?:quantity\s*:|return item|item\(s\) in your return request|refund (?:amount|subtotal)|estimated refund)/i.test(text)) continue;
+        const names = extractItemNamesFromContainer(el);
+        const fallback = names.length ? names : extractItemNamesFromText(text);
+        const itemName = fallback[0] || null;
+        const asin = extractAsins(el)[0] || null;
+        if (!itemName && !asin) continue;
+        const refundAmount = findLabeledMoney(text, ['Item refund', 'Refund amount', 'Estimated refund', 'Refund subtotal']);
+        candidates.push({ itemName, asin, refundAmount, textLength: text.length });
+      }
+    }
+    const byKey = new Map();
+    for (const entry of candidates) {
+      const key = entry.asin || String(entry.itemName || '').toLowerCase();
+      const prior = byKey.get(key);
+      if (!prior || entry.textLength < prior.textLength) byKey.set(key, entry);
+    }
+    return Array.from(byKey.values()).map(({ textLength, ...entry }) => entry).slice(0, 30);
+  }
+
+  function isCompleteCanonicalDetail(record, url) {
+    if (!record || record.recordType !== 'order' || !isOrderDetailPage(url)) return false;
+    const urlId = orderIdFromUrl(url);
+    if (!urlId || urlId !== record.orderId) return false;
+    if (!record.orderDetailsUrl || !isOrderDetailPage(record.orderDetailsUrl)) return false;
+    return Boolean(record.orderDate && Number.isFinite(Number(record.purchaseAmount)) && Array.isArray(record.itemNames) && record.itemNames.length);
+  }
+
   function extractReturnToken(url) {
     try {
       const u = new URL(url);
@@ -364,8 +435,11 @@
 
   function makeRecordId(record) {
     if (record.recordType === 'order') return `order:${record.orderId}`;
-    const detail = record.returnToken || slug(record.returnStatusUrl || '') || record.asins?.[0] || slug(record.itemNames?.[0] || '') || String(record.refundAmount || 'unknown');
-    return `return:${record.orderId}:${detail}`;
+    const tokenKey = slug(record.returnToken || record.returnStatusUrl || '') || 'return';
+    const itemKey = record.provisionalReturn
+      ? 'pending'
+      : (record.asins?.[0] || slug(record.itemNames?.[0] || '') || String(record.refundAmount ?? record.refundSubtotal ?? 'unknown'));
+    return `return:${record.orderId}:${tokenKey}:${itemKey}`;
   }
 
   function parseTextRecord(text, orderId, options = {}) {
@@ -373,7 +447,7 @@
     const refundAmount = findRefundAmount(text);
     const refundSubtotal = findLabeledMoney(text, ['Refund subtotal']);
     const purchaseAmount = findOrderTotal(text);
-    const cardLast4 = findCardLast4(text);
+    const cardLast4 = findCardLast4(options.paymentText || text);
     const orderDate = findDateAfterLabel(text, ['Order placed', 'Order date']);
     const returnDate = findDateAfterLabel(text, ['Return initiated', 'Return started', 'Returned on', 'Drop off by', 'Dropoff by']);
     const recordType = options.forceRecordType || (pageType === 'return' ? 'return' : 'order');
@@ -444,21 +518,6 @@
     return null;
   }
 
-  function synthesizeOrderDetailUrl(baseUrl, orderId) {
-    if (!/^\d{3}-\d{7}-\d{7}$/.test(String(orderId || ''))) return null;
-    try {
-      const base = new URL(baseUrl);
-      if (!/(^|\.)amazon\.com$/i.test(base.hostname)) return null;
-      // Amazon Business currently exposes View order details on the consumer Amazon host as:
-      // https://www.amazon.com/your-orders/order-details?orderID=...
-      const u = new URL('https://www.amazon.com/your-orders/order-details');
-      u.searchParams.set('orderID', String(orderId));
-      return u.toString();
-    } catch (_) {
-      return null;
-    }
-  }
-
   function extractOrderDetailLinks(doc, baseUrl) {
     if (!doc?.querySelectorAll) return [];
     const byOrder = new Map();
@@ -479,18 +538,6 @@
       const orderId = orderIdFromUrl(url) || nearestOrderId(a);
       if (!orderId || byOrder.has(orderId)) continue;
       byOrder.set(orderId, { orderId, url, discoveredFrom: 'view-order-details-link' });
-    }
-
-    // Every order card on a history page must eventually be detail-scanned. If Amazon has hidden
-    // the anchor behind client-side markup, synthesize the same /your-orders/order-details URL from
-    // the order ID rather than allowing an index-only record to remain permanently incomplete.
-    if (isOrderHistoryPage(doc, baseUrl)) {
-      const pageText = normalizeText(doc?.body?.innerText || doc?.body?.textContent || '');
-      for (const orderId of extractOrderIds(pageText)) {
-        if (byOrder.has(orderId)) continue;
-        const url = synthesizeOrderDetailUrl(baseUrl, orderId);
-        if (url) byOrder.set(orderId, { orderId, url, discoveredFrom: 'order-id-fallback' });
-      }
     }
 
     return Array.from(byOrder.values());
@@ -524,12 +571,14 @@
       if (seen.has(key)) continue;
       seen.add(key);
       const container = closestContainerForOrder(doc, orderId);
+      const containerText = normalizeText(container?.innerText || container?.textContent || '');
+      const itemScoped = /(?:item\(s\) in your return request|return item|quantity\s*:|refund subtotal|estimated refund)/i.test(containerText);
       results.push({
         orderId,
         url,
         returnToken: extractReturnToken(url),
-        itemNames: extractItemNamesFromContainer(container),
-        asins: extractAsins(container)
+        itemNames: itemScoped ? extractItemNamesFromContainer(container) : [],
+        asins: itemScoped ? extractAsins(container) : []
       });
     }
     return results;
@@ -950,23 +999,57 @@
       if ((detailPage || pageType === 'return') && orderIds.length === 1) container = doc?.body || container;
       const containerText = container ? normalizeText(container.innerText || container.textContent || '') : contextAround(bodyText, orderId);
       const context = (detailPage || pageType === 'return') && orderIds.length === 1 ? bodyText : (containerText.length >= 80 ? containerText : contextAround(bodyText, orderId));
+      const paymentEvidenceText = extractPaymentEvidenceText(container || doc?.body);
       const record = parseTextRecord(context, orderId, {
         pageType,
+        paymentText: paymentEvidenceText || context,
         returnToken,
         returnStatusUrl: pageType === 'return' ? url : null,
         url,
         host: (() => { try { return new URL(url).host; } catch (_) { return null; } })(),
         title: doc?.title || null,
         orderDetailsUrl: detailPage ? url : (detailByOrder.get(orderId) || null),
-        detailScanComplete: detailPage,
+        detailScanComplete: false,
         forceRecordType: pageType === 'return' ? 'return' : 'order'
       });
       const domNames = extractItemNamesFromContainer(container);
       const asins = extractAsins(container);
       if (domNames.length && !(pageType === 'return' && record.itemNames?.length)) record.itemNames = domNames;
       record.asins = asins;
-      record.recordId = makeRecordId(record);
-      records.push(record);
+
+      if (detailPage && record.recordType === 'order') {
+        record.detailScanComplete = isCompleteCanonicalDetail(record, url);
+        record.detailScannedAt = record.detailScanComplete ? new Date().toISOString() : null;
+      }
+
+      if (pageType === 'return') {
+        const returnItems = extractReturnItemEntries(container || doc?.body);
+        if (returnItems.length) {
+          for (const item of returnItems) {
+            const itemRecord = {
+              ...record,
+              itemNames: item.itemName ? [item.itemName] : [],
+              asins: item.asin ? [item.asin] : [],
+              refundAmount: Number.isFinite(Number(item.refundAmount)) ? Number(item.refundAmount) : (returnItems.length === 1 ? record.refundAmount : null),
+              refundSubtotal: Number.isFinite(Number(item.refundAmount)) ? Number(item.refundAmount) : (returnItems.length === 1 ? record.refundSubtotal : null),
+              refundAmountScope: 'item',
+              provisionalReturn: false,
+              authoritativeReturnCapture: true
+            };
+            itemRecord.recordId = makeRecordId(itemRecord);
+            records.push(itemRecord);
+          }
+        } else {
+          record.provisionalReturn = false;
+          record.authoritativeReturnCapture = true;
+          record.refundAmountScope = (record.itemNames || []).length === 1 ? 'item' : 'return';
+          record.recordId = makeRecordId(record);
+          records.push(record);
+        }
+      } else {
+        record.recordId = makeRecordId(record);
+        records.push(record);
+      }
 
       // Amazon Business sometimes shows a return-status sentence on the order card without a
       // dedicated return-status anchor. Treat only strong lifecycle text as evidence; the generic
@@ -976,7 +1059,7 @@
         const milestones = parseReturnMilestones(context);
         const provisional = {
           recordType: 'return', orderId,
-          itemNames: domNames.length ? domNames : record.itemNames || [], asins,
+          itemNames: linked?.itemNames || [], asins: linked?.asins || [],
           orderDate: record.orderDate || null, returnDate: record.returnDate || null,
           purchaseAmount: null, refundSubtotal: findLabeledMoney(context, ['Refund subtotal']), refundAmount: findRefundAmount(context),
           cardLast4: findCardLast4(context), refundMethod: /original payment method/i.test(context) ? 'original payment method' : null,
@@ -985,7 +1068,8 @@
           returnToken: linked?.returnToken || `status-${slug(orderId)}`,
           returnStatusUrl: linked?.url || null,
           sourceUrl: url, sourceHost: (() => { try { return new URL(url).host; } catch (_) { return null; } })(), pageTitle: doc?.title || null,
-          orderDetailsUrl: detailPage ? url : (detailByOrder.get(orderId) || null), detailScanComplete: false, detailScannedAt: null
+          orderDetailsUrl: detailPage ? url : (detailByOrder.get(orderId) || null), detailScanComplete: false, detailScannedAt: null,
+          provisionalReturn: true, authoritativeReturnCapture: false
         };
         provisional.recordId = makeRecordId(provisional);
         records.push(provisional);
@@ -1026,7 +1110,9 @@
           pageTitle: doc?.title || null,
           orderDetailsUrl: detailByOrder.get(link.orderId) || null,
           detailScanComplete: false,
-          detailScannedAt: null
+          detailScannedAt: null,
+          provisionalReturn: true,
+          authoritativeReturnCapture: false
         };
         provisional.recordId = makeRecordId(provisional);
         records.push(provisional);
@@ -1053,8 +1139,8 @@
       nextPageUrl: findNextLink(doc, url),
       nextPageCandidates: nextPageCandidates(doc, url),
       hasNextPageControl: hasNextPageControl(doc),
-      historyOrderIds: isOrderHistoryPage(doc, url) ? detailLinks.map(x => x.orderId).filter(Boolean) : [],
-      historyVisibleCount: isOrderHistoryPage(doc, url) ? detailLinks.length : 0,
+      historyOrderIds: isOrderHistoryPage(doc, url) ? extractOrderIds(bodyText) : [],
+      historyVisibleCount: isOrderHistoryPage(doc, url) ? extractOrderIds(bodyText).length : 0,
       historyTotalOrders: isOrderHistoryPage(doc, url) ? totalOrdersForCurrentFilter(doc) : null,
       historyDisplayedYear: isOrderHistoryPage(doc, url) ? displayedHistoryYear(doc, url) : null,
       historyTimeFilterValue: isOrderHistoryPage(doc, url) ? historyTimeFilterState(doc).value : null,
@@ -1072,6 +1158,9 @@
     findOrderTotal,
     findRefundAmount,
     findCardLast4,
+    extractPaymentEvidenceText,
+    extractReturnItemEntries,
+    isCompleteCanonicalDetail,
     extractOrderIds,
     inferPageType,
     classifyStatus,
@@ -1083,7 +1172,6 @@
     parseDocument,
     makeRecordId,
     extractOrderDetailLinks,
-    synthesizeOrderDetailUrl,
     extractReturnStatusLinks,
     extractOrderHistoryLinks,
     extractHistoryYearLinks,

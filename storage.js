@@ -187,7 +187,10 @@
       if (value === null || value === undefined || value === '') continue;
       if (wouldRegressReturn && ['returnStage', 'status', 'statusText'].includes(key)) continue;
       if (key === 'status' && incomingStatusRank < existingStatusRank) continue;
-      if (Array.isArray(value)) merged[key] = mergeArray(existing?.[key], value);
+      if (Array.isArray(value)) {
+        if (incoming?.recordType === 'return' && incoming?.authoritativeReturnCapture && ['itemNames', 'asins'].includes(key)) merged[key] = mergeArray([], value);
+        else merged[key] = mergeArray(existing?.[key], value);
+      }
       else if (key === 'returnMilestones') merged[key] = mergeReturnMilestones(existing?.[key], value);
       else if (key === 'detailScanComplete') merged[key] = Boolean(existing?.[key] || value);
       else merged[key] = value;
@@ -277,7 +280,24 @@
     let inserted = 0;
     let updated = 0;
     let unchanged = 0;
+    let removed = 0;
     const changedRecordIds = [];
+
+    const authoritativeGroups = new Map();
+    for (const record of (records || []).filter(r => r?.recordType === 'return' && r?.authoritativeReturnCapture && r?.orderId && r?.returnToken)) {
+      const key = `${record.orderId}:${record.returnToken}`;
+      if (!authoritativeGroups.has(key)) authoritativeGroups.set(key, new Set());
+      authoritativeGroups.get(key).add(record.recordId);
+    }
+    for (const [recordId, existing] of Array.from(byId.entries())) {
+      if (existing?.recordType !== 'return' || !existing?.returnToken) continue;
+      const keepIds = authoritativeGroups.get(`${existing.orderId}:${existing.returnToken}`);
+      if (!keepIds || keepIds.has(recordId)) continue;
+      if (!existing.provisionalReturn && !existing.authoritativeReturnCapture) continue;
+      byId.delete(recordId);
+      removed += 1;
+      changedRecordIds.push(recordId);
+    }
 
     for (const incoming of records || []) {
       if (!incoming?.recordId || !incoming?.orderId) continue;
@@ -301,13 +321,13 @@
       }
     }
 
-    const changed = inserted > 0 || updated > 0;
+    const changed = inserted > 0 || updated > 0 || removed > 0;
     let nextLedger = Array.from(byId.values()).sort((a, b) => String(b.lastScannedAt || b.firstSeenAt || '').localeCompare(String(a.lastScannedAt || a.firstSeenAt || '')));
     if (changed || nextLedger.some((r, i) => r !== ledger[i])) await setLedger(nextLedger);
     else nextLedger = ledger;
 
     const afterSummary = summarizeLedger(nextLedger);
-    return { inserted, updated, unchanged, changed, total: nextLedger.length, changedRecordIds, beforeSummary, afterSummary };
+    return { inserted, updated, removed, unchanged, changed, total: nextLedger.length, changedRecordIds, beforeSummary, afterSummary };
   }
 
   function effectiveState(record, settings) {

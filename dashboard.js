@@ -29,8 +29,9 @@
     return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(d);
   }
   function canonicalDetailUrl(orderId, order) {
-    if (order?.orderDetailsUrl && /\/your-orders\/order-details/i.test(order.orderDetailsUrl)) return order.orderDetailsUrl;
-    return `https://www.amazon.com/your-orders/order-details?orderID=${encodeURIComponent(orderId)}`;
+    const url = order?.orderDetailsUrl || '';
+    if (url && /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|order-details)/i.test(url)) return url;
+    return '';
   }
   function stageLabel(stage) {
     return ({
@@ -255,8 +256,10 @@
           ${row.hasReturn ? `${returnProgressMarkup(row)}${financialState}` : `<span class="muted tiny">${esc(row.statusLabel || 'Order')}</span>`}
         </div>
         <div class="line-actions">
-          <button class="mini" data-open-url="${esc(row.openUrl)}">Details</button>
-          ${row.hasReturn ? `<button class="mini" data-action="reconcile" data-order="${esc(row.orderId)}">Credit</button><button class="mini" data-action="reset" data-order="${esc(row.orderId)}">Reset</button>` : ''}
+          <button class="mini action-large" data-open-url="${esc(row.openUrl)}" ${row.openUrl ? '' : 'disabled'}>Details</button>
+          <button class="mini action-large" data-action="reconcile" data-order="${esc(row.orderId)}" ${row.hasReturn ? '' : 'disabled'}>Credit</button>
+          <button class="mini action-large" data-action="reset" data-order="${esc(row.orderId)}" ${row.hasReturn ? '' : 'disabled'}>Reset</button>
+          <button class="mini action-large" data-refresh-order="${esc(row.orderId)}" ${row.openUrl ? '' : 'disabled'}>Refresh</button>
         </div>
       </article>`;
     }).join('');
@@ -305,8 +308,25 @@
     const button = event.target.closest('[data-view]'); if (button) setView(button.dataset.view);
   });
   body.addEventListener('click', async event => {
+    const refresh = event.target.closest('button[data-refresh-order]');
+    if (refresh && !refresh.disabled) {
+      const original = refresh.textContent;
+      refresh.disabled = true;
+      refresh.textContent = 'Refreshing…';
+      try {
+        const response = await chrome.runtime.sendMessage({ type: 'ARL_REFRESH_ORDER', orderId: refresh.dataset.refreshOrder });
+        if (!response?.ok) throw new Error(response?.error || 'Refresh failed');
+        await reload();
+      } catch (error) {
+        alert(`Order refresh failed: ${error?.message || error}`);
+      } finally {
+        refresh.disabled = false;
+        refresh.textContent = original;
+      }
+      return;
+    }
     const open = event.target.closest('[data-open-url]');
-    if (open) { await chrome.tabs.create({ url: open.dataset.openUrl }); return; }
+    if (open && open.dataset.openUrl) { await chrome.tabs.create({ url: open.dataset.openUrl }); return; }
     const action = event.target.closest('button[data-action]');
     if (!action) return;
     const manualState = action.dataset.action === 'reconcile' ? 'reconciled' : null;
@@ -373,7 +393,7 @@
       schema: 'amazon-refund-credit-check-request/v1',
       requestId,
       generatedAt: new Date().toISOString(),
-      sourceExtensionVersion: '0.16.0',
+      sourceExtensionVersion: '0.17.0',
       privacy: 'Contains Amazon Order IDs, refund amounts, dates, item titles, and card last four only. No bank credentials or financial-provider tokens.',
       matchingPolicy: {
         amountTolerance: 0.01,

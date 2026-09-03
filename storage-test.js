@@ -88,15 +88,23 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   assert(bankSummary.creditedOrders >= 1, 'bank-confirmed refund should count as credited');
 
   const prov = {
-    recordId: 'return:114-9999999-1111111:RMAABC123', recordType: 'return', orderId: '114-9999999-1111111',
-    itemNames: [], returnToken: 'RMAABC123', returnStatusUrl: 'https://amazon.com/spr/returns/prep?orderId=114-9999999-1111111&rmaId=RMAABC123',
-    status: 'return_in_progress', returnStage: 'started', statusText: 'Amazon return status link detected'
+    recordId: 'return:114-9999999-1111111:rmaabc123:pending', recordType: 'return', orderId: '114-9999999-1111111',
+    itemNames: ['Wrong bundled sibling'], returnToken: 'RMAABC123', returnStatusUrl: 'https://amazon.com/spr/returns/prep?orderId=114-9999999-1111111&rmaId=RMAABC123',
+    status: 'return_in_progress', returnStage: 'started', statusText: 'Amazon return status link detected', provisionalReturn: true, authoritativeReturnCapture: false
   };
   await s.upsertRecords([prov]);
-  await s.upsertRecords([{ ...prov, itemNames: ['Returned Widget'], refundAmount: 88.50, status: 'refunded', returnStage: 'refund_issued', statusText: 'We have issued your refund' }]);
+  await s.upsertRecords([{ ...prov, recordId: 'return:114-9999999-1111111:rmaabc123:returned-widget', itemNames: ['Returned Widget'], refundAmount: 88.50, status: 'refunded', returnStage: 'refund_issued', statusText: 'We have issued your refund', provisionalReturn: false, authoritativeReturnCapture: true }]);
   const sameReturnRows = (await s.getLedger()).filter(r => r.orderId === prov.orderId && r.recordType === 'return');
   assert(sameReturnRows.length === 1, 'provisional return should upgrade in-place when the return page has the same token');
-  assert(sameReturnRows[0].itemNames.includes('Returned Widget'), 'return-page item should upgrade provisional return');
+  assert(sameReturnRows[0].itemNames.length === 1 && sameReturnRows[0].itemNames[0] === 'Returned Widget', 'authoritative return page must replace provisional bundled item names');
+
+  await s.upsertRecords([
+    { ...sameReturnRows[0], recordId:'return:114-9999999-1111111:rmaabc123:item-a', itemNames:['Item A'], asins:['B000000001'], refundAmount:20, authoritativeReturnCapture:true, provisionalReturn:false },
+    { ...sameReturnRows[0], recordId:'return:114-9999999-1111111:rmaabc123:item-b', itemNames:['Item B'], asins:['B000000002'], refundAmount:30, authoritativeReturnCapture:true, provisionalReturn:false }
+  ]);
+  const itemLevelRows = (await s.getLedger()).filter(r => r.orderId === prov.orderId && r.recordType === 'return');
+  assert(itemLevelRows.some(r => r.itemNames[0] === 'Item A' && r.refundAmount === 20), 'first returned item must retain its own expected refund');
+  assert(itemLevelRows.some(r => r.itemNames[0] === 'Item B' && r.refundAmount === 30), 'second returned item must retain its own expected refund');
 
   console.log('storage tests passed');
 })().catch(error => { console.error(error); process.exit(1); });

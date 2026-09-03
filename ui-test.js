@@ -1,0 +1,17 @@
+const fs = require('fs');
+function assert(condition, message) { if (!condition) throw new Error(message); }
+const dashboard = fs.readFileSync(__dirname + '/dashboard.js', 'utf8');
+const content = fs.readFileSync(__dirname + '/content.js', 'utf8');
+const background = fs.readFileSync(__dirname + '/background.js', 'utf8');
+const css = fs.readFileSync(__dirname + '/ui.css', 'utf8');
+for (const label of ['Details</button>', 'Credit</button>', 'Reset</button>', 'Refresh</button>']) assert(dashboard.includes(label), `dashboard must render fixed ${label.split('<')[0]} action`);
+assert(dashboard.includes("type: 'ARL_REFRESH_ORDER'"), 'Refresh button must request background-tab refresh');
+assert(background.includes('async function forceRefreshOrder'), 'background worker must implement rendered forced refresh');
+assert(background.includes("active: false"), 'forced refresh must use an inactive tab');
+assert(content.includes('/\\/spr\\/returns\\/prep/i'), 'detail fetch must follow real return prep links');
+assert(!dashboard.includes('return `https://www.amazon.com/your-orders/order-details?orderID='), 'dashboard must not synthesize canonical detail URLs');
+assert(!background.includes('function syntheticDetailUrl'), 'background must not synthesize canonical detail URLs');
+assert(css.includes('grid-template-columns: repeat(4, minmax(0, 1fr))'), 'actions must stay side-by-side in four fixed columns');
+assert(css.includes('min-height: 36px'), 'actions must use enlarged click targets');
+assert(css.includes('overflow-x: hidden'), 'ledger must continue forbidding horizontal order scrolling');
+console.log('ui regression tests passed');
