@@ -26,6 +26,8 @@ jobs:
           sed -i 's/re.subn(pattern, repl, text/re.subn(pattern, lambda _m: repl, text/' .github/scripts/patch_v017.py
       - name: Apply v0.17 patch
         run: python3 .github/scripts/patch_v017.py
+      - name: Update legacy tests for v0.17 contract
+        run: python3 .github/scripts/patch_v017_followup.py
       - name: Run full regression suite
         run: npm test
       - name: Commit candidate to branch
