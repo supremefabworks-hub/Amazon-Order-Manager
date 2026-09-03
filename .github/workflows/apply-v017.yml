@@ -1,0 +1,36 @@
+name: Apply v0.17 implementation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-v017.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: v017-issue7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Apply v0.17 patch
+        run: python3 .github/scripts/patch_v017.py
+      - name: Run full regression suite
+        run: npm test
+      - name: Commit candidate to branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add manifest.json package.json parser.js storage.js background.js content.js dashboard.js ui.css parser-test.js storage-test.js background-test.js state-machine-test.js ui-test.js
+          git status --short
+          git commit -m 'Implement v0.17 authoritative crawl and return fixes'
+          git push origin HEAD:v017-issue7
