@@ -2,59 +2,107 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current baseline:** v0.16.0. This repository is the source of truth. Chat sessions are intentionally disposable; no development session should require access to an earlier chat.
+**Current source baseline: v0.17.0.** The root source tree is complete. GitHub is the source of truth and chat sessions are disposable.
+
+Issue **#7 — v0.17 authoritative details, return refresh, crawler and UI fixes** remains the active release tracker until the documented live Amazon Business acceptance pass is completed. The code/test scope of Issues #2–#7 is implemented in v0.17.0.
 
 ## Start a completely new chat
 
-Use the exact reusable prompt in [`NEW_CHAT_PROMPT.md`](NEW_CHAT_PROMPT.md). It instructs a fresh session to reconstruct all context from GitHub, inspect the active issue/source/tests, recover the verified snapshot if necessary, implement the next work, and write all new project state back to GitHub before the chat ends.
-
-`SESSION_PROTOCOL.md` defines the mandatory startup and handoff process. `AGENTS.md` instructs AI/contributors not to depend on chat memory.
+Use [`NEW_CHAT_PROMPT.md`](NEW_CHAT_PROMPT.md). `SESSION_PROTOCOL.md` defines mandatory startup/handoff behavior and `AGENTS.md` requires contributors to reconstruct state from GitHub rather than chat history.
 
 ## Resume development
 
-1. Read `AGENTS.md`, `SESSION_PROTOCOL.md`, and `PROJECT_HANDOFF.md`.
-2. Read `README.md` and `TESTING.md`.
-3. Use **Issue #7 — v0.17 authoritative details, return refresh, crawler and UI fixes** as the primary active implementation checklist unless a newer issue supersedes it.
-4. Inspect current root source, manifest version, recent commits, and tests rather than assuming the repo state.
-5. The exact pre-GitHub v0.16.0 extension ZIP is archived under `source-snapshots/v0.16.0/full/`. Reconstruct it using that directory's README if a known-good baseline is needed.
-6. Snapshot integrity: SHA-256 `0ac308d98a4acf47fff51f5fd63410a9e9dc8e6105e7d6f17dcebd9b6e71ac42`, size `77,670` bytes.
-7. New development should keep ordinary editable source files at repository root and continue as v0.17.0.
-8. During active development, version changes should wipe local extension ledger/crawl state so every build starts clean. Disable that destructive policy before a production release.
+1. Read `AGENTS.md`, `PROJECT_HANDOFF.md`, `README.md`, `TESTING.md`, and `SESSION_PROTOCOL.md`.
+2. Read Issue #7 and any newer issue that supersedes it.
+3. Inspect root source, `manifest.json`, recent commits, and tests before editing.
+4. Root v0.17.0 is the active source. The archived v0.16.0 ZIP is recovery material only.
+5. Run `npm test` before packaging or merging changes.
+6. Keep implementation, regression tests, docs, issue state, and handoff synchronized.
 
-## Development workflow
+## v0.17 architecture
 
-Clone this repository once and load the repository root with Chrome **Load unpacked** once the active source tree is complete. Thereafter, pull changes and click **Reload** in `chrome://extensions`. CI is configured to run the regression suite and package an installable ZIP once the full active source is present at repository root.
+### Canonical orders
 
-Every coherent development session must commit implementation, regression tests, changed architecture/acceptance criteria, and issue state. Critical information must never live only in chat.
+- Every visible history order must use its real Amazon `View order details` URL.
+- The extension no longer synthesizes missing canonical detail URLs.
+- A managed crawl stops if a visible Order ID lacks its real detail link.
+- `Detailed` means a complete matching canonical detail capture, not merely a discovered order or a detail-shaped URL.
 
-## Current architecture
+### Strict lifetime crawler
 
-- Scan Amazon/Amazon Business order history year by year.
-- Finish every page in the current year before switching to the next older year.
-- A page is accepted only when its visible Order-ID fingerprint differs from the prior page.
-- Capture real **View order details** links; Order Details is the canonical order record.
-- Use real `/spr/returns/prep` links only as secondary lifecycle enrichment for an actual return on that same Order ID.
-- Keep one canonical order record per Amazon Order ID with item-level return information.
-- Reconcile issued refunds through a narrow import/export bridge so bank credentials never enter the extension.
+Crawler order is mandatory:
 
-## Important Amazon Business finding
+`newest year -> page 1 -> every visible order -> every canonical detail -> next page -> ... -> next older year`
 
-The tested Amazon Business UI uses client-side history routes such as:
+- Never switch years while an enabled next-page control exists.
+- Accept pagination only when the non-empty visible Order-ID fingerprint changes.
+- URL/hash changes alone are not progress.
+- Repeated page contents are failed pagination.
+- Preserve exact checkpoint state and globally deduplicate by Order ID.
+- Repeated orders across pages are stored as overlap evidence.
 
-`#time/2026/pagination/1/` → `#time/2026/pagination/2/` → `#time/2026/pagination/3/`
+The tested Amazon Business UI has used routes such as:
 
-Do not assume that `?timeFilter=year-YYYY&startIndex=N` will advance this UI; it has been observed to serve the first page again. Prefer the actual numbered pager/Next control and verify a different Order-ID fingerprint before advancing crawler state.
+`#time/2026/pagination/1/` -> `#time/2026/pagination/2/` -> `#time/2026/pagination/3/`
 
-## Immediate v0.17 priorities
+### Returns
 
-- Scope payment-card last-four extraction to the actual payment-method section; never accept an arbitrary four-digit token.
-- Make `Detailed` mean a complete successful Order Details parse.
-- Add per-order **Refresh** using an inactive background Order Details tab.
-- Refresh real return lifecycle status from the return-status link exposed by Order Details.
-- Prevent false `Refund issued` classifications and preserve monotonic return state.
-- Track the actual returned item and item-level expected refund for bundled orders.
-- Standardize every ledger row to one compact symmetric grid; enlarge Details / Credit / Reset / Refresh and keep them side-by-side.
-- Preserve exact year/page/order crawl checkpoints and treat overlapping Order IDs as overlap evidence, not duplicate orders.
-- Finish all pages in one year before selecting the next older year.
+- `Return or replace items` alone is never evidence of a return.
+- A real `/spr/returns/prep` link discovered from Order Details may be followed only for that same order as secondary lifecycle enrichment.
+- Return stages are evidence-based and monotonic.
+- A future credit date is an ETA, not a completed credit.
+- Bundled/multi-item returns are stored as item-level records. Whole-order/whole-return totals are not duplicated onto each returned item.
+- Multiple separate returns may exist under one Amazon Order ID.
 
-See `PROJECT_HANDOFF.md` and Issue #7 before implementing the next build.
+### Payment card last four
+
+- Card last four is extracted only from payment-method/payment-information evidence.
+- DOM payment sections are preferred.
+- A narrow text window beginning at a payment heading may be used if selectors are unavailable.
+- Whole-page arbitrary four-digit text is not a fallback.
+
+### Per-order Refresh
+
+Every row has a fixed four-action group:
+
+`Details | Credit | Reset | Refresh`
+
+`Refresh` uses the stored real Order Details URL, opens an inactive Amazon tab, parses the rendered detail page, follows real return-status links for the same order when present, saves fresh state, and closes the temporary tab.
+
+### Dashboard
+
+- Views: `All orders`, `Returns`, `Needs review`.
+- Same compact grid structure for every row/status.
+- Inapplicable actions are disabled instead of removed.
+- No horizontally scrollable order containers.
+- Needs Review dollar total equals the expected-refund sum of the flagged return records.
+
+### Development reset policy
+
+During active development, changing the manifest version wipes ledger/crawl/worker/workflow/bank-verification state and stores the new version. v0.17 also handles upgrade from v0.16 even though v0.16 did not previously persist the version key.
+
+Disable this destructive policy before a production release where data migration/persistence is expected.
+
+## Validation
+
+Run:
+
+```bash
+npm test
+```
+
+The suite covers parser, storage, background navigation, strict crawl state, reconciliation, and UI regressions. See `TESTING.md` and `PROJECT_HANDOFF.md` for the complete live acceptance checklist.
+
+## Privacy / security
+
+The extension must never receive bank credentials, financial-provider tokens, password/session exports, or full bank transaction feeds. Bank reconciliation remains the narrow JSON bridge documented in the repository.
+
+Do not add CAPTCHA bypass, stealth/anti-detection behavior, cookie/password harvesting, or committed real-account Amazon/Teach Mode data.
+
+## Recovery archive
+
+The exact pre-GitHub v0.16.0 ZIP remains under `source-snapshots/v0.16.0/full/` for recovery/audit only.
+
+Documented SHA-256:
+
+`0ac308d98a4acf47fff51f5fd63410a9e9dc8e6105e7d6f17dcebd9b6e71ac42`
