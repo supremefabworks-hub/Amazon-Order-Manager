@@ -106,5 +106,29 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   assert(itemLevelRows.some(r => r.itemNames[0] === 'Item A' && r.refundAmount === 20), 'first returned item must retain its own expected refund');
   assert(itemLevelRows.some(r => r.itemNames[0] === 'Item B' && r.refundAmount === 30), 'second returned item must retain its own expected refund');
 
+  const trustedReturn = {
+    recordId: 'return:113-7000000-3000000:rma-trusted:item-item-a', recordType: 'return', orderId: '113-7000000-3000000',
+    returnToken: 'RMA-TRUSTED', returnItemId: 'item-a', itemNames: ['Trusted Order Details Item'], asins: ['B000000010'],
+    itemIdentitySource: 'order-detail-return-link', status: 'return_in_progress', returnStage: 'started', provisionalReturn: true
+  };
+  await s.upsertRecords([trustedReturn]);
+  await s.upsertRecords([{ ...trustedReturn, itemNames: ['Wrong Return Page Sibling'], asins: ['B000000099'], itemIdentitySource: 'return-page-item', authoritativeReturnCapture: true, provisionalReturn: false, status: 'refunded', returnStage: 'refund_issued' }]);
+  const trustedMerged = (await s.getLedger()).find(r => r.recordId === trustedReturn.recordId);
+  assert(trustedMerged.itemNames[0] === 'Trusted Order Details Item', 'exact Order Details return-link identity must survive conflicting return-page item text');
+  assert(trustedMerged.asins[0] === 'B000000010', 'trusted return-link ASIN must survive a conflicting authoritative-page ASIN');
+  assert(trustedMerged.itemIdentityConflict === true, 'conflicting return-page identity must be flagged instead of silently replacing trusted identity');
+  assert(s.needsCreditReview(trustedMerged) === true, 'item identity conflicts must require review');
+
+  const stableTrusted = {
+    recordId: 'return:113-7000000-3000001:rma-stable:item-item-b', recordType: 'return', orderId: '113-7000000-3000001',
+    returnToken: 'RMA-STABLE', returnItemId: 'item-b', itemNames: ['Stable Trusted Item'], asins: ['B000000011'],
+    itemIdentitySource: 'order-detail-return-link', status: 'return_in_progress', returnStage: 'started', provisionalReturn: true
+  };
+  await s.upsertRecords([stableTrusted]);
+  await s.upsertRecords([{ ...stableTrusted, asins: [], itemNames: ['Stable Trusted Item'], itemIdentitySource: 'return-page-item', authoritativeReturnCapture: true, provisionalReturn: false, status: 'refunded', returnStage: 'refund_issued' }]);
+  const stableMerged = (await s.getLedger()).find(r => r.recordId === stableTrusted.recordId);
+  assert(stableMerged.itemIdentitySource === 'order-detail-return-link', 'matching refresh must retain the trusted Order Details binding');
+  assert(!stableMerged.itemIdentityConflict, 'missing ASIN with the same trusted title must not create a false identity conflict');
+
   console.log('storage tests passed');
 })().catch(error => { console.error(error); process.exit(1); });

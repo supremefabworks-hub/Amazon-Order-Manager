@@ -394,6 +394,38 @@ assert(authoritative && authoritative.detailScanComplete === true, 'URL-targeted
 assert(authoritative.purchaseAmount === 456.78, 'URL-targeted detail parser should read the full-page order total');
 assert(authoritative.cardLast4 === '4321', 'URL-targeted detail parser should read the payment card');
 assert(!detailWithRelated.records.some(x => x.orderId === '114-9999999-8888888'), 'related order IDs should not become records on a targeted detail page');
+
+const canonicalRefundDoc = {
+  title: 'Order Details',
+  body: { innerText: `Order placed September 1, 2026
+Order # 113-5152372-1721052
+Order Total: $262.86
+Refund Total $185.46
+Example returned item
+Quantity: 1`, textContent: '' },
+  querySelectorAll() { return []; }, querySelector() { return null; }
+};
+const canonicalRefundParsed = p.parseDocument(canonicalRefundDoc, 'https://www.amazon.com/your-orders/order-details?orderID=113-5152372-1721052');
+const canonicalRefundOrder = canonicalRefundParsed.records.find(x => x.recordType === 'order');
+assert(canonicalRefundOrder.canonicalRefundTotal === 185.46, 'Order Details Refund Total must become the canonical order-level refund total');
+assert(p.findOrderRefundTotal(`Order Total $262.86
+Refund Total $185.46`) === 185.46, 'canonical Refund Total helper must parse the explicit label');
+
+const proseRefundDoc = {
+  title: 'Order Details',
+  body: { innerText: `Order placed September 1, 2026
+Order # 113-5152372-1721053
+Order Total: $100.00
+Example returned item
+Quantity: 1
+Your refund has been issued $88.00`, textContent: '' },
+  querySelectorAll() { return []; }, querySelector() { return null; }
+};
+const proseRefundParsed = p.parseDocument(proseRefundDoc, 'https://www.amazon.com/your-orders/order-details?orderID=113-5152372-1721053');
+const proseRefundOrder = proseRefundParsed.records.find(x => x.recordType === 'order');
+assert(proseRefundOrder.refundAmount === 88, 'generic refund parser should still retain lifecycle refund evidence where applicable');
+assert(proseRefundOrder.canonicalRefundTotal == null, 'refund lifecycle prose must not become canonical Order Details Refund Total');
+assert(p.findOrderRefundTotal(`Your refund has been issued $88.00`) === null, 'canonical helper must reject refund lifecycle prose');
 console.log('authoritative detail-page tests passed');
 
 const detailHistoryGuardDoc = {

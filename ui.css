@@ -307,3 +307,8 @@ html, body { max-width: 100%; overflow-x: hidden; }
   .line-metric { font-size: 9px; }
   .line-progress, .line-actions { grid-column: 1 / -1; }
 }
+
+/* v0.18.2 explicit multi-return child groups */
+.return-track-meta { display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin:1px 0 2px; min-width:0; font-size:8px; color:#59616b; }
+.return-track-meta span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.return-track-meta strong { flex:0 0 auto; font-size:9px; color:#1f2328; }

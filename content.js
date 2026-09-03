@@ -139,7 +139,7 @@
     const byOrder = new Map();
     for (const record of returns) {
       if (!byOrder.has(record.orderId)) byOrder.set(record.orderId, new Map());
-      const key = record.returnToken || `${record.refundAmount ?? record.refundSubtotal ?? ''}:${(record.itemNames || []).join('|')}:${record.returnStage || ''}`;
+      const key = `${record.returnToken || record.returnStatusUrl || 'return'}:${record.returnItemId || record.asins?.[0] || record.itemNames?.[0] || record.recordId || 'item'}`;
       const bucket = byOrder.get(record.orderId);
       const prior = bucket.get(key);
       if (!prior || storage.returnStageRank(record) > storage.returnStageRank(prior) || String(record.lastScannedAt || '') > String(prior.lastScannedAt || '')) bucket.set(key, record);
@@ -164,6 +164,23 @@
         :host{display:block;font-family:Arial,Helvetica,sans-serif;color:#0f1111}.wrap{display:grid;gap:8px}.return-box{border:1px solid #d5d9d9;border-radius:8px;background:#fff;padding:12px 14px}.head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.head b{display:block;color:#067d62;font-size:14px}.head span{display:block;margin-top:3px;font-size:12px;color:#565959;max-width:620px}.head strong{color:#067d62;font-size:14px;white-space:nowrap}.track{position:relative;display:grid;grid-template-columns:repeat(4,1fr);margin-top:14px;gap:4px}.rail{position:absolute;left:8%;right:8%;top:19px;height:4px;background:#d5d9d9;border-radius:8px;overflow:hidden}.rail i{display:block;height:100%;background:#00a8a8;border-radius:8px}.step{position:relative;text-align:center;z-index:1;color:#68717a}.step em{display:flex;width:18px;height:18px;margin:10px auto 4px;border-radius:50%;border:2px solid #879596;background:#fff;align-items:center;justify-content:center;font-style:normal;font-size:11px;color:#fff}.step.done em{background:#00a8a8;border-color:#00a8a8}.step small{display:block;min-height:14px;font-size:9px;color:#565959}.step span{display:block;font-size:10px}.step.done span{color:#007185;font-weight:700}a{display:inline-block;margin-top:10px;color:#007185;font-size:11px;text-decoration:none}a:hover{text-decoration:underline}</style>
         <div class="wrap">${records.map(inlineReturnCard).join('')}</div>`;
     }
+  }
+
+
+  function applySingleReturnIdentityHint(records, hint) {
+    const list = Array.isArray(records) ? records.slice() : [];
+    const authoritative = list.filter(record => record?.recordType === 'return' && record?.authoritativeReturnCapture);
+    if (authoritative.length !== 1 || !hint?.returnItemId) return list;
+    const target = authoritative[0];
+    const enriched = {
+      ...target,
+      returnToken: hint.returnToken || target.returnToken || null,
+      returnItemId: hint.returnItemId,
+      returnContractId: hint.returnContractId || target.returnContractId || null,
+      returnRmaId: hint.returnRmaId || target.returnRmaId || null
+    };
+    enriched.recordId = parser.makeRecordId(enriched);
+    return list.map(record => record === target ? enriched : record);
   }
 
   async function announceDiscovery(result) {
@@ -258,7 +275,16 @@
           }
           await new Promise(resolve => setTimeout(resolve, randomBetween(700, 1600)));
         }
-        return scanPage({ force: true, notify: false, discover: false, reportChange: false });
+        const scanned = await scanPage({ force: true, notify: false, discover: false, reportChange: false });
+        if (message.job?.type === 'return' && scanned?.ok) {
+          const stabilizedRecords = applySingleReturnIdentityHint(scanned.records || [], message.job);
+          if (stabilizedRecords.some((record, index) => record?.recordId !== scanned.records?.[index]?.recordId)) {
+            const stabilizedReturns = stabilizedRecords.filter(record => record?.recordType === 'return' && record?.authoritativeReturnCapture);
+            const stabilizedSave = stabilizedReturns.length ? await storage.upsertRecords(stabilizedReturns) : scanned.save;
+            return { ...scanned, records: stabilizedRecords, save: stabilizedSave };
+          }
+        }
+        return scanned;
       })().then(sendResponse);
       return true;
     }
@@ -326,7 +352,8 @@
             const returnDoc = new DOMParser().parseFromString(returnHtml, 'text/html');
             const returnFinalUrl = returnResponse.url || returnUrl.toString();
             const returnParsed = parser.parseDocument(returnDoc, returnFinalUrl);
-            const returnRecords = (returnParsed.records || []).filter(record => record?.recordType === 'return' && record?.orderId === orderId && record?.authoritativeReturnCapture);
+            let returnRecords = (returnParsed.records || []).filter(record => record?.recordType === 'return' && record?.orderId === orderId && record?.authoritativeReturnCapture);
+            returnRecords = applySingleReturnIdentityHint(returnRecords, link).filter(record => record?.recordType === 'return' && record?.authoritativeReturnCapture);
             if (!returnRecords.length) return { ok: false, error: `Return status for ${orderId} did not contain an authoritative return record.` };
             const returnSave = await storage.upsertRecords(returnRecords);
             returnRefreshes.push({ url: returnFinalUrl, records: returnRecords.length, save: returnSave });

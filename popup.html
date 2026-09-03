@@ -8,7 +8,7 @@
 </head>
 <body class="popup-body popup-simple-body">
   <main class="popup-card">
-    <div class="eyebrow">AMAZON REFUND LEDGER · v0.16</div>
+    <div class="eyebrow" id="versionLabel">AMAZON REFUND LEDGER</div>
     <h1>Order scan</h1>
     <p class="muted" id="pageStatus">Visible Amazon order pages are captured automatically. Use Start to run the full lifetime scan.</p>
 
@@ -19,6 +19,9 @@
 
     <button id="scanToggleButton" class="primary">Start lifetime scan</button>
     <button id="dashboardButton" class="secondary">Open dashboard</button>
+
+    <div id="devUpdateStatus" class="result">Checking development update status…</div>
+    <button id="checkUpdateButton" class="secondary">Check development update now</button>
 
     <div id="result" class="result hidden"></div>
     <p class="fineprint">Scan order: year → page → every View order details page → next history page. Return Center pages are not used as the canonical order source.</p>

@@ -21,7 +21,7 @@
   function esc(value) {
     return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
   }
-  function money(value) { return Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '—'; }
+  function money(value) { if (value === null || value === undefined || value === '') return '—'; return Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '—'; }
   function formatDate(value) {
     if (!value) return '—';
     const d = new Date(value);
@@ -48,16 +48,75 @@
     }
     return out;
   }
+  function returnRecordIdentity(record) {
+    const token = String(record?.returnToken || record?.returnStatusUrl || record?.recordId || 'return').toLowerCase();
+    const item = String(record?.returnItemId || record?.asins?.[0] || record?.itemNames?.[0] || record?.recordId || 'item').toLowerCase();
+    return `${token}:${item}`;
+  }
   function dedupeReturns(records) {
     const byKey = new Map();
     for (const r of records || []) {
-      const amount = Number.isFinite(Number(r.refundAmount ?? r.refundSubtotal)) ? Number(r.refundAmount ?? r.refundSubtotal).toFixed(2) : '';
-      const itemKey = uniqueStrings([...(r.asins || []), ...(r.itemNames || [])]).join('|').toLowerCase();
-      const key = r.returnToken || `${amount}:${itemKey}:${r.returnDate || ''}` || r.recordId;
+      const key = returnRecordIdentity(r);
       const existing = byKey.get(key);
       if (!existing || storage.returnStageRank(r) > storage.returnStageRank(existing) || String(r.lastScannedAt || '') > String(existing.lastScannedAt || '')) byKey.set(key, r);
     }
     return Array.from(byKey.values());
+  }
+  function returnGroupAmount(records) {
+    const ordered = (records || []).slice().sort((a,b) => String(b.lastScannedAt || '').localeCompare(String(a.lastScannedAt || '')));
+    const explicitGroupValues = [];
+    for (const r of ordered) {
+      const groupRaw = r.returnGroupRefundAmount;
+      const scopedRaw = r.refundAmountScope === 'return' ? (r.refundAmount ?? r.refundSubtotal) : null;
+      const groupValue = groupRaw === null || groupRaw === undefined || groupRaw === '' ? NaN : Number(groupRaw);
+      const scopedValue = scopedRaw === null || scopedRaw === undefined || scopedRaw === '' ? NaN : Number(scopedRaw);
+      const value = Number.isFinite(groupValue) ? groupValue : scopedValue;
+      if (Number.isFinite(value)) explicitGroupValues.push(value);
+    }
+    if (explicitGroupValues.length) {
+      const cents = new Set(explicitGroupValues.map(value => value.toFixed(2)));
+      return { amount: explicitGroupValues[0], conflict: cents.size > 1 };
+    }
+    const itemValues = new Map();
+    for (const r of ordered) {
+      const raw = r.refundAmount ?? r.refundSubtotal;
+      const value = raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
+      if (!Number.isFinite(value)) continue;
+      if (r.refundAmountScope === 'item') itemValues.set(returnRecordIdentity(r), value);
+    }
+    if (itemValues.size) return { amount: Array.from(itemValues.values()).reduce((a,b)=>a+b,0), conflict: false };
+    // Legacy records did not mark scope. Treat one amount per return group, never once per child.
+    const legacy = ordered.map(r => {
+      const raw = r.refundAmount ?? r.refundSubtotal;
+      return raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
+    }).find(Number.isFinite);
+    return { amount: Number.isFinite(legacy) ? legacy : null, conflict: false };
+  }
+  function groupReturnRecords(records) {
+    const groups = new Map();
+    for (const record of records || []) {
+      const key = String(record.returnToken || record.returnStatusUrl || record.recordId || 'return');
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(record);
+    }
+    return Array.from(groups.entries()).map(([key, groupRecords]) => {
+      const representative = groupRecords.slice().sort((a,b) => {
+        const rank = storage.returnStageRank(b) - storage.returnStageRank(a);
+        if (rank) return rank;
+        return String(b.lastScannedAt || '').localeCompare(String(a.lastScannedAt || ''));
+      })[0];
+      const amountState = returnGroupAmount(groupRecords);
+      return {
+        key,
+        records: groupRecords,
+        representative,
+        itemNames: uniqueStrings(groupRecords.flatMap(r => r.itemNames || [])),
+        asins: uniqueStrings(groupRecords.flatMap(r => r.asins || [])),
+        amount: amountState.amount,
+        amountConflict: amountState.conflict,
+        itemIdentityConflict: groupRecords.some(r => r.itemIdentityConflict)
+      };
+    });
   }
 
   function buildRows() {
@@ -79,37 +138,52 @@
     for (const orderId of ids) {
       const order = orders.get(orderId) || null;
       const returnRecords = dedupeReturns(returns.get(orderId) || []);
+      const returnGroups = groupReturnRecords(returnRecords);
       const manualReconciled = returnRecords.some(r => r.manualState === 'reconciled');
       const ranks = returnRecords.map(r => storage.returnStageRank(r));
       const hasReturn = returnRecords.length > 0;
-      const needsReview = hasReturn && !manualReconciled && returnRecords.some(r => storage.needsCreditReview(r));
-      const allCredited = hasReturn && returnRecords.length && returnRecords.every(r => storage.isCreditConfirmed(r));
-      const allIssued = hasReturn && ranks.length && ranks.every(rank => rank >= storage.RETURN_STAGE_RANK.refund_issued);
+      const allCredited = hasReturn && returnRecords.every(r => storage.isCreditConfirmed(r));
+      const allIssued = hasReturn && ranks.every(rank => rank >= storage.RETURN_STAGE_RANK.refund_issued);
+
+      const orderItemNames = uniqueStrings(order?.itemNames || []);
+      const returnedItemNames = uniqueStrings(returnRecords.flatMap(r => r.itemNames || []));
+      const childRefundAmount = returnGroups.reduce((total, group) => total + (Number.isFinite(Number(group.amount)) ? Number(group.amount) : 0), 0);
+      const canonicalRefundCandidate = order?.canonicalRefundTotal;
+      const canonicalRefundTotal = canonicalRefundCandidate !== null && canonicalRefundCandidate !== undefined && canonicalRefundCandidate !== '' && Number.isFinite(Number(canonicalRefundCandidate))
+        ? Number(canonicalRefundCandidate)
+        : null;
+      const refundAmount = canonicalRefundTotal != null ? canonicalRefundTotal : (returnGroups.some(g => Number.isFinite(Number(g.amount))) ? childRefundAmount : null);
+      const refundAmountMismatch = canonicalRefundTotal != null && childRefundAmount > canonicalRefundTotal + 0.011;
+      const itemIdentityConflict = returnGroups.some(group => group.itemIdentityConflict);
+      const groupAmountConflict = returnGroups.some(group => group.amountConflict);
+      const needsReview = hasReturn && !manualReconciled && (
+        returnRecords.some(r => storage.needsCreditReview(r)) || refundAmountMismatch || itemIdentityConflict || groupAmountConflict
+      );
+
       let stateKey = 'purchase';
       let statusLabel = order?.statusText || (order?.detailScanComplete ? 'Order details captured' : 'Order discovered');
       if (manualReconciled) { stateKey = 'reconciled'; statusLabel = 'Reconciled'; }
       else if (needsReview) {
         stateKey = 'needs_review';
-        const lowest = returnRecords.slice().sort((a,b) => storage.returnStageRank(a)-storage.returnStageRank(b))[0];
-        statusLabel = stageLabel(storage.getReturnStage(lowest));
+        if (refundAmountMismatch) statusLabel = 'Refund amount mismatch';
+        else if (itemIdentityConflict) statusLabel = 'Return item needs review';
+        else if (groupAmountConflict) statusLabel = 'Return refund needs review';
+        else {
+          const lowest = returnRecords.slice().sort((a,b) => storage.returnStageRank(a)-storage.returnStageRank(b))[0];
+          statusLabel = stageLabel(storage.getReturnStage(lowest));
+        }
       } else if (allCredited) { stateKey = 'credited'; statusLabel = 'Credited'; }
       else if (allIssued) { stateKey = 'refund_issued'; statusLabel = 'Refund issued'; }
       else if (hasReturn) { stateKey = 'return'; statusLabel = stageLabel(storage.getReturnStage(returnRecords[0])); }
 
-      const itemNames = uniqueStrings([...(order?.itemNames || []), ...returnRecords.flatMap(r => r.itemNames || [])]);
-      const refundAmounts = new Map();
-      for (const r of returnRecords) {
-        const n = Number(r.refundAmount ?? r.refundSubtotal);
-        if (!Number.isFinite(n)) continue;
-        const k = r.returnToken || `${n.toFixed(2)}:${uniqueStrings([...(r.asins || []), ...(r.itemNames || [])]).join('|')}`;
-        if (!refundAmounts.has(k)) refundAmounts.set(k, n);
-      }
-      const refundAmount = refundAmounts.size ? Array.from(refundAmounts.values()).reduce((a,b)=>a+b,0) : null;
       const statusTexts = uniqueStrings(returnRecords.map(r => r.statusText).filter(Boolean));
       const lastScannedAt = [order?.lastScannedAt, ...returnRecords.map(r => r.lastScannedAt)].filter(Boolean).sort().at(-1) || null;
+      const itemNames = hasReturn ? returnedItemNames : orderItemNames;
       rows.push({
-        orderId, order, returns: returnRecords, hasReturn, needsReview, stateKey, statusLabel,
-        itemNames, orderTotal: order?.purchaseAmount ?? null, refundAmount,
+        orderId, order, returns: returnRecords, returnGroups, hasReturn, needsReview, stateKey, statusLabel,
+        itemNames, orderItemNames, returnedItemNames, searchItemNames: uniqueStrings([...orderItemNames, ...returnedItemNames]),
+        orderTotal: order?.purchaseAmount ?? null, refundAmount, canonicalRefundTotal, childRefundAmount,
+        refundAmountMismatch, itemIdentityConflict, groupAmountConflict,
         cardLast4: order?.cardLast4 || returnRecords.find(r => r.cardLast4)?.cardLast4 || null,
         amazonStatus: statusTexts.length ? statusTexts.join(' · ') : (order?.statusText || order?.status || '—'),
         detailComplete: Boolean(order?.detailScanComplete), detailScannedAt: order?.detailScannedAt || null,
@@ -123,10 +197,12 @@
     });
   }
 
-  function lifecycleMarkup(record, showItemTitle = false) {
+  function lifecycleMarkup(group, index, totalGroups) {
+    const record = group.representative;
     const progress = storage.returnProgress(record);
     const expectedCredit = !progress.credited ? storage.expectedCreditDate(record) || '' : '';
-    const verification = record.bankVerification || null;
+    const verificationRecord = group.records.find(r => r.bankVerification) || record;
+    const verification = verificationRecord.bankVerification || null;
     const creditDate = progress.bankCreditConfirmed
       ? (verification?.postedDate || verification?.verifiedAt || '')
       : progress.amazonCredited
@@ -138,7 +214,7 @@
       ['refundIssued', 'Refund issued', progress.refundIssued, milestoneDate(record, 'refundIssued')],
       ['credited', progress.credited ? 'Bank credited' : (expectedCredit ? `Expected ${expectedCredit}` : 'Credit pending'), progress.credited, creditDate]
     ];
-    const item = (record.itemNames || [])[0] || '';
+    const items = group.itemNames.length ? group.itemNames.join(' · ') : 'Returned item pending authoritative scan';
     let verificationMarkup = '';
     if (verification) {
       if (verification.status === 'confirmed') {
@@ -148,8 +224,11 @@
         verificationMarkup = `<div class="bank-match bank-match-review"><strong>Bank match needs review</strong><span>${esc(verification.reason || 'Multiple plausible credits.')}</span></div>`;
       }
     }
+    const warnings = [group.itemIdentityConflict ? 'Item identity conflict' : '', group.amountConflict ? 'Refund amount conflict' : ''].filter(Boolean).join(' · ');
     return `<div class="return-track-item compact-return-track">
-      ${showItemTitle && item ? `<div class="return-track-title">${esc(item)}</div>` : ''}
+      <div class="return-track-title">Return ${index}${totalGroups > 1 ? ` of ${totalGroups}` : ''} · ${esc(items)}</div>
+      <div class="return-track-meta"><span>${esc(stageLabel(storage.getReturnStage(record)))}</span><strong>${money(group.amount)}</strong></div>
+      ${warnings ? `<div class="muted tiny">${esc(warnings)}</div>` : ''}
       <div class="lifecycle lifecycle-lineitem">
         <div class="lifecycle-line"><span style="width:${progress.percent}%"></span></div>
         ${steps.map(step => `<div class="life-step ${step[2] ? 'done' : ''}"><small>${esc(step[3] || '')}</small><i>${step[2] ? '✓' : ''}</i><span>${esc(step[1])}</span></div>`).join('')}
@@ -158,9 +237,8 @@
     </div>`;
   }
   function returnProgressMarkup(row) {
-    if (!row.returns.length) return '<span class="muted">—</span>';
-    const showTitles = row.returns.length > 1;
-    return `<div class="return-track-stack compact-return-stack">${row.returns.map(r => lifecycleMarkup(r, showTitles)).join('')}</div>`;
+    if (!row.returnGroups.length) return '<span class="muted">—</span>';
+    return `<div class="return-track-stack compact-return-stack">${row.returnGroups.map((group, index) => lifecycleMarkup(group, index + 1, row.returnGroups.length)).join('')}</div>`;
   }
 
   function filteredRows() {
@@ -169,7 +247,7 @@
       if (currentView === 'returns' && !row.hasReturn) return false;
       if (currentView === 'needs_review' && !row.needsReview) return false;
       if (q) {
-        const hay = [row.orderId, ...row.itemNames, row.cardLast4, row.statusLabel, row.amazonStatus, row.orderTotal, row.refundAmount].join(' ').toLowerCase();
+        const hay = [row.orderId, ...(row.searchItemNames || row.itemNames), row.cardLast4, row.statusLabel, row.amazonStatus, row.orderTotal, row.refundAmount].join(' ').toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -178,17 +256,15 @@
 
   function sum(rows, field) { return rows.reduce((total,row) => total + (Number.isFinite(Number(row[field])) ? Number(row[field]) : 0), 0); }
   function returnRecordAmountTotal(records) {
-    const values = new Map();
-    for (const r of records || []) {
-      const amount = Number(r.refundAmount ?? r.refundSubtotal);
-      if (!Number.isFinite(amount)) continue;
-      const key = r.returnToken || `${amount.toFixed(2)}:${uniqueStrings([...(r.asins || []), ...(r.itemNames || [])]).join('|').toLowerCase()}`;
-      if (!values.has(key)) values.set(key, amount);
-    }
-    return Array.from(values.values()).reduce((a,b) => a + b, 0);
+    return groupReturnRecords(dedupeReturns(records || [])).reduce((total, group) => total + (Number.isFinite(Number(group.amount)) ? Number(group.amount) : 0), 0);
   }
   function needsReviewExpectedAmount(row) {
-    return returnRecordAmountTotal((row.returns || []).filter(r => storage.needsCreditReview(r)));
+    const recordTotal = returnRecordAmountTotal((row.returns || []).filter(r => storage.needsCreditReview(r)));
+    if (row.refundAmountMismatch || row.itemIdentityConflict || row.groupAmountConflict) {
+      const orderExpected = row.refundAmount;
+      if (orderExpected !== null && orderExpected !== undefined && orderExpected !== '' && Number.isFinite(Number(orderExpected))) return Number(orderExpected);
+    }
+    return recordTotal;
   }
 
   function renderStats() {
@@ -228,7 +304,7 @@
     const rows = filteredRows();
     empty.classList.toggle('hidden', rows.length !== 0);
     body.innerHTML = rows.map(row => {
-      const items = row.itemNames.length ? row.itemNames.join(' · ') : 'Item title pending Order Details scan';
+      const items = row.itemNames.length ? row.itemNames.join(' · ') : (row.hasReturn ? `${row.returnGroups.length} return${row.returnGroups.length === 1 ? '' : 's'} pending item identity` : 'Item title pending Order Details scan');
       const detailBadge = row.detailComplete
         ? `<span class="badge badge-reconciled">Detailed</span>`
         : '<span class="badge">Detail queued</span>';
@@ -393,7 +469,7 @@
       schema: 'amazon-refund-credit-check-request/v1',
       requestId,
       generatedAt: new Date().toISOString(),
-      sourceExtensionVersion: '0.17.0',
+      sourceExtensionVersion: chrome.runtime.getManifest()?.version || null,
       privacy: 'Contains Amazon Order IDs, refund amounts, dates, item titles, and card last four only. No bank credentials or financial-provider tokens.',
       matchingPolicy: {
         amountTolerance: 0.01,

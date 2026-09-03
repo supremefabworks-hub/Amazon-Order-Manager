@@ -52,6 +52,16 @@
     return null;
   }
 
+  function findOrderRefundTotal(text) {
+    // Canonical order-level refund money comes only from a standalone Amazon Order Details
+    // "Refund Total" label. Generic refund lifecycle prose must never become this field.
+    const normalized = normalizeText(text);
+    const match = normalized.match(/(?:^|\n)\s*Refund Total\s*:?\s*\$\s*([0-9,]+(?:\.\d{2})?)\s*(?:$|\n)/im);
+    if (!match) return null;
+    const value = Number(match[1].replace(/,/g, ''));
+    return Number.isFinite(value) ? value : null;
+  }
+
   function findRefundAmount(text) {
     const direct = findLabeledMoney(text, [
       'Total refund', 'Total estimated refund*', 'Total estimated refund', 'Estimated refund', 'Refund amount', 'Refund total', 'Refund subtotal'
@@ -489,14 +499,18 @@
   function makeRecordId(record) {
     if (record.recordType === 'order') return `order:${record.orderId}`;
     const tokenKey = slug(record.returnToken || record.returnStatusUrl || '') || 'return';
-    const itemKey = record.provisionalReturn
-      ? 'pending'
-      : (record.asins?.[0] || slug(record.itemNames?.[0] || '') || String(record.refundAmount ?? record.refundSubtotal ?? 'unknown'));
+    // Amazon's return-status URL gives us a stable child identity. Prefer itemId so the
+    // provisional Order Details record and later authoritative return-page capture merge into
+    // the same row instead of being re-keyed by whichever title the page parser happened to see.
+    const itemKey = record.returnItemId
+      ? `item-${slug(record.returnItemId)}`
+      : (record.asins?.[0] || slug(record.itemNames?.[0] || '') || (record.provisionalReturn ? 'pending' : String(record.refundAmount ?? record.refundSubtotal ?? 'unknown')));
     return `return:${record.orderId}:${tokenKey}:${itemKey}`;
   }
 
   function parseTextRecord(text, orderId, options = {}) {
     const pageType = options.pageType || inferPageType(text, options.url);
+    const returnMeta = returnUrlMetadata(options.returnStatusUrl || options.url || '');
     const refundAmount = findRefundAmount(text);
     const refundSubtotal = findLabeledMoney(text, ['Refund subtotal']);
     const purchaseAmount = findOrderTotal(text);
@@ -523,7 +537,11 @@
       returnMilestones,
       expectedCreditDate: returnMilestones?.expectedCreditDate || null,
       statusText: extractStatusText(text),
-      returnToken: options.returnToken || null,
+      returnToken: options.returnToken || returnMeta.returnToken || null,
+      returnItemId: options.returnItemId || returnMeta.returnItemId || null,
+      returnContractId: options.returnContractId || returnMeta.returnContractId || null,
+      returnRmaId: options.returnRmaId || returnMeta.returnRmaId || null,
+      itemIdentitySource: options.itemIdentitySource || null,
       returnStatusUrl: options.returnStatusUrl || (recordType === 'return' ? options.url || null : null),
       sourceUrl: options.url || null,
       sourceHost: options.host || null,
@@ -596,6 +614,48 @@
     return Array.from(byOrder.values());
   }
 
+  function returnUrlMetadata(url) {
+    const out = { returnToken: extractReturnToken(url), returnItemId: null, returnContractId: null, returnRmaId: null };
+    try {
+      const u = new URL(url);
+      out.returnItemId = u.searchParams.get('itemId') || null;
+      out.returnContractId = u.searchParams.get('contractId') || null;
+      out.returnRmaId = u.searchParams.get('rmaId') || null;
+    } catch (_) {}
+    return out;
+  }
+
+  function nearestReturnItemEvidence(anchor) {
+    let current = anchor?.parentElement || null;
+    let fallback = null;
+    for (let depth = 0; current && depth < 10; depth += 1, current = current.parentElement) {
+      let anchors = [];
+      try { anchors = Array.from(current.querySelectorAll?.('a[href]') || []); } catch (_) {}
+      const byAsin = new Map();
+      for (const a of anchors) {
+        const href = String(a.getAttribute?.('href') || a.href || '');
+        const match = href.match(/\/dp\/([A-Z0-9]{10})(?:[/?#]|$)/i) || href.match(/[?&]asin=([A-Z0-9]{10})(?:&|$)/i);
+        if (!match) continue;
+        const asin = match[1].toUpperCase();
+        let itemName = normalizeText(a.innerText || a.textContent || a.getAttribute?.('aria-label') || a.getAttribute?.('title') || '');
+        if (/^(?:view your item|buy it again|write a product review|ask product question)$/i.test(itemName)) itemName = '';
+        const existing = byAsin.get(asin);
+        if (!existing || (!existing.itemName && itemName)) byAsin.set(asin, { asin, itemName });
+      }
+      if (!byAsin.size) continue;
+      const entries = Array.from(byAsin.values());
+      const evidence = {
+        itemNames: entries.map(entry => entry.itemName).filter(Boolean),
+        asins: entries.map(entry => entry.asin).filter(Boolean)
+      };
+      if (!fallback) fallback = evidence;
+      // A duplicated image/title anchor for one ASIN still counts as one product. The smallest
+      // ancestor with one unique product is the item-specific return block we want.
+      if (entries.length === 1) return evidence;
+    }
+    return fallback || { itemNames: [], asins: [] };
+  }
+
   function extractReturnStatusLinks(doc, baseUrl) {
     if (!doc?.querySelectorAll) return [];
     const results = [];
@@ -606,8 +666,7 @@
     for (const a of Array.from(doc.querySelectorAll('a[href]'))) {
       const href = String(a.getAttribute('href') || a.href || '');
       const text = normalizeText(a.innerText || a.textContent || '');
-      if (!href) continue;
-      if (genericActionRe.test(text)) continue;
+      if (!href || genericActionRe.test(text)) continue;
       const url = absoluteAmazonUrl(href, baseUrl);
       if (!url) continue;
       let explicitUrl = false;
@@ -619,19 +678,25 @@
       if (!explicitUrl && !statusTextRe.test(text)) continue;
       const orderId = orderIdFromUrl(url) || nearestOrderId(a);
       if (!orderId) continue;
-      const token = extractReturnToken(url) || slug(url);
-      const key = `${orderId}:${token}`;
+      const meta = returnUrlMetadata(url);
+      const token = meta.returnToken || slug(url);
+      const itemKey = meta.returnItemId || '';
+      const key = `${orderId}:${token}:${itemKey}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const container = closestContainerForOrder(doc, orderId);
-      const containerText = normalizeText(container?.innerText || container?.textContent || '');
-      const itemScoped = /(?:item\(s\) in your return request|return item|quantity\s*:|refund subtotal|estimated refund)/i.test(containerText);
+      const evidence = nearestReturnItemEvidence(a);
       results.push({
         orderId,
         url,
-        returnToken: extractReturnToken(url),
-        itemNames: itemScoped ? extractItemNamesFromContainer(container) : [],
-        asins: itemScoped ? extractAsins(container) : []
+        returnToken: token,
+        returnItemId: meta.returnItemId,
+        returnContractId: meta.returnContractId,
+        returnRmaId: meta.returnRmaId,
+        itemNames: evidence.itemNames,
+        asins: evidence.asins,
+        itemIdentitySource: (evidence.itemNames.length || evidence.asins.length)
+          ? (isOrderDetailPage(baseUrl) ? 'order-detail-return-link' : 'return-link')
+          : null
       });
     }
     return results;
@@ -1031,7 +1096,8 @@
   function parseDocument(doc, url) {
     const bodyText = normalizeText(doc?.body?.innerText || doc?.body?.textContent || '');
     const pageType = inferPageType(bodyText, url);
-    const returnToken = extractReturnToken(url);
+    const returnMeta = returnUrlMetadata(url);
+    const returnToken = returnMeta.returnToken;
     const detailPage = isOrderDetailPage(url);
     const extractedOrderIds = extractOrderIds(bodyText);
     const urlOrderId = orderIdFromUrl(url);
@@ -1057,6 +1123,9 @@
         pageType,
         paymentText: paymentEvidenceText,
         returnToken,
+        returnItemId: returnMeta.returnItemId,
+        returnContractId: returnMeta.returnContractId,
+        returnRmaId: returnMeta.returnRmaId,
         returnStatusUrl: pageType === 'return' ? url : null,
         url,
         host: (() => { try { return new URL(url).host; } catch (_) { return null; } })(),
@@ -1073,19 +1142,36 @@
       if (detailPage && record.recordType === 'order') {
         record.detailScanComplete = isCompleteCanonicalDetail(record, url);
         record.detailScannedAt = record.detailScanComplete ? new Date().toISOString() : null;
+        // Order Details' Refund Total is the canonical order-level refund figure. Keep it separate
+        // from child-return amounts so the dashboard can never inflate the order by summing
+        // duplicated return-page totals.
+        const canonicalRefundTotal = findOrderRefundTotal(context);
+        record.canonicalRefundTotal = canonicalRefundTotal != null && Number.isFinite(Number(canonicalRefundTotal)) ? Number(canonicalRefundTotal) : null;
       }
 
       if (pageType === 'return') {
         const returnItems = extractReturnItemEntries(container || doc?.body);
+        const groupRefundRaw = record.refundAmount ?? record.refundSubtotal;
+        const groupRefundAmount = groupRefundRaw === null || groupRefundRaw === undefined || groupRefundRaw === ''
+          ? null
+          : (Number.isFinite(Number(groupRefundRaw)) ? Number(groupRefundRaw) : null);
         if (returnItems.length) {
           for (const item of returnItems) {
+            const itemRefund = item.refundAmount === null || item.refundAmount === undefined || item.refundAmount === ''
+              ? null
+              : (Number.isFinite(Number(item.refundAmount)) ? Number(item.refundAmount) : null);
+            const singleItemGroup = returnItems.length === 1;
+            const scopedRefund = itemRefund ?? (singleItemGroup ? groupRefundAmount : null);
             const itemRecord = {
               ...record,
               itemNames: item.itemName ? [item.itemName] : [],
               asins: item.asin ? [item.asin] : [],
-              refundAmount: Number.isFinite(Number(item.refundAmount)) ? Number(item.refundAmount) : (returnItems.length === 1 ? record.refundAmount : null),
-              refundSubtotal: Number.isFinite(Number(item.refundAmount)) ? Number(item.refundAmount) : (returnItems.length === 1 ? record.refundSubtotal : null),
-              refundAmountScope: 'item',
+              returnItemId: singleItemGroup ? record.returnItemId : null,
+              refundAmount: scopedRefund,
+              refundSubtotal: scopedRefund,
+              returnGroupRefundAmount: groupRefundAmount,
+              refundAmountScope: itemRefund != null || (singleItemGroup && groupRefundAmount != null) ? 'item' : (groupRefundAmount != null ? 'return' : null),
+              itemIdentitySource: (item.itemName || item.asin) ? 'return-page-item' : null,
               provisionalReturn: false,
               authoritativeReturnCapture: true
             };
@@ -1095,7 +1181,9 @@
         } else {
           record.provisionalReturn = false;
           record.authoritativeReturnCapture = true;
-          record.refundAmountScope = (record.itemNames || []).length === 1 ? 'item' : 'return';
+          record.returnGroupRefundAmount = groupRefundAmount;
+          record.refundAmountScope = (record.itemNames || []).length === 1 ? 'item' : (groupRefundAmount != null ? 'return' : null);
+          record.itemIdentitySource = (record.itemNames || []).length ? 'return-page-item' : null;
           record.recordId = makeRecordId(record);
           records.push(record);
         }
@@ -1107,7 +1195,7 @@
       // Amazon Business sometimes shows a return-status sentence on the order card without a
       // dedicated return-status anchor. Treat only strong lifecycle text as evidence; the generic
       // "Return or replace items" action is intentionally excluded.
-      if (pageType !== 'return' && strongReturnEvidence(context)) {
+      if (pageType !== 'return' && strongReturnEvidence(context) && !(detailPage && returnLinks.some(link => link.orderId === orderId))) {
         const linked = returnLinks.find(x => x.orderId === orderId) || null;
         const milestones = parseReturnMilestones(context);
         const provisional = {
@@ -1157,6 +1245,10 @@
           expectedCreditDate: null,
           statusText: 'Amazon return status link detected',
           returnToken: token,
+          returnItemId: link.returnItemId || null,
+          returnContractId: link.returnContractId || null,
+          returnRmaId: link.returnRmaId || null,
+          itemIdentitySource: link.itemIdentitySource || null,
           returnStatusUrl: link.url,
           sourceUrl: url,
           sourceHost: (() => { try { return new URL(url).host; } catch (_) { return null; } })(),
@@ -1210,6 +1302,7 @@
     findLabeledMoney,
     findOrderTotal,
     findRefundAmount,
+    findOrderRefundTotal,
     findCardLast4,
     extractPaymentEvidenceText,
     extractReturnItemEntries,
@@ -1226,6 +1319,8 @@
     makeRecordId,
     extractOrderDetailLinks,
     extractReturnStatusLinks,
+    returnUrlMetadata,
+    nearestReturnItemEvidence,
     extractOrderHistoryLinks,
     extractHistoryYearLinks,
     historyYearFromUrl,

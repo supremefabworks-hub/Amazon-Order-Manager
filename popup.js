@@ -7,7 +7,11 @@
   const scanToggleButton = document.getElementById('scanToggleButton');
   const dashboardButton = document.getElementById('dashboardButton');
   const result = document.getElementById('result');
+  const versionLabel = document.getElementById('versionLabel');
+  const devUpdateStatus = document.getElementById('devUpdateStatus');
+  const checkUpdateButton = document.getElementById('checkUpdateButton');
   let scannerState = null;
+  versionLabel.textContent = `AMAZON REFUND LEDGER · v${chrome.runtime.getManifest()?.version || '—'}`;
 
   function money(value) { return Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '$0.00'; }
   function esc(value) { return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -41,7 +45,9 @@
       const total = Number(order?.purchaseAmount); if (Number.isFinite(total)) allTotal += total;
       if (rs.length) {
         returnCount += 1;
-        returnTotal += refundTotal(rs);
+        const canonicalRaw = order?.canonicalRefundTotal;
+        const canonical = canonicalRaw == null ? NaN : Number(canonicalRaw);
+        returnTotal += Number.isFinite(canonical) ? canonical : refundTotal(rs);
         const reconciled = rs.some(r => r.manualState === 'reconciled');
         const flagged = reconciled ? [] : rs.filter(r => storage.needsCreditReview(r));
         if (flagged.length) {
@@ -59,6 +65,26 @@
     const [ledger, settings] = await Promise.all([storage.getLedger(), storage.getSettings()]);
     const s = summarizeOrders(ledger, settings);
     popupSummary.innerHTML = card('all','All orders',s.allCount,s.allTotal) + card('returns','Returns',s.returnCount,s.returnTotal) + card('needs_review','Needs review',s.reviewCount,s.reviewTotal);
+  }
+  async function renderDevUpdateStatus() {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'ARL_GET_DEV_UPDATE_STATUS' });
+      const status = response?.status || null;
+      const current = chrome.runtime.getManifest()?.version || '—';
+      if (!status) {
+        devUpdateStatus.textContent = `Development updater · current ${current} · no check recorded yet`;
+        devUpdateStatus.className = 'result warn';
+        return;
+      }
+      const latest = status.latestVersion || status.installedVersion || current;
+      const checked = status.lastCheckedAt || status.lastCheckStartedAt || '';
+      const suffix = status.error ? ` · ${status.error}` : status.checking ? ' · checking…' : status.hostAvailable === false ? ' · native host unavailable' : '';
+      devUpdateStatus.textContent = `Development updater · current ${current} · latest ${latest}${checked ? ` · checked ${new Date(checked).toLocaleTimeString()}` : ''}${suffix}`;
+      devUpdateStatus.className = `result ${status.error || status.hostAvailable === false ? 'warn' : 'ok'}`;
+    } catch (error) {
+      devUpdateStatus.textContent = `Development updater status unavailable · ${error?.message || error}`;
+      devUpdateStatus.className = 'result warn';
+    }
   }
   function formatRemaining(ms) { const sec=Math.ceil(ms/1000); return sec<60?`${sec}s`:`${Math.ceil(sec/60)}m`; }
   async function renderScanner() {
@@ -83,6 +109,21 @@
   }
   popupSummary.addEventListener('click', event => { const b=event.target.closest('[data-view]'); if (b) openDashboard(b.dataset.view); });
   dashboardButton.addEventListener('click', () => openDashboard('all'));
+  checkUpdateButton.addEventListener('click', async () => {
+    checkUpdateButton.disabled = true;
+    checkUpdateButton.textContent = 'Checking…';
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'ARL_CHECK_DEV_UPDATE' });
+      if (!response?.ok) throw new Error(response?.error || 'Update check failed');
+      await renderDevUpdateStatus();
+    } catch (error) {
+      devUpdateStatus.textContent = `Development update failed · ${error?.message || error}`;
+      devUpdateStatus.className = 'result warn';
+    } finally {
+      checkUpdateButton.disabled = false;
+      checkUpdateButton.textContent = 'Check development update now';
+    }
+  });
   scanToggleButton.addEventListener('click', async () => {
     scanToggleButton.disabled = true;
     try {
@@ -96,6 +137,7 @@
   chrome.storage.onChanged.addListener(changes => {
     if (changes.ledger) renderLedger().catch(()=>{});
     if (changes.backgroundScanState) renderScanner().catch(()=>{});
+    if (changes.devUpdateStatus) renderDevUpdateStatus().catch(()=>{});
   });
-  renderLedger(); renderScanner(); setInterval(renderScanner,1600);
+  renderLedger(); renderScanner(); renderDevUpdateStatus(); setInterval(renderScanner,1600);
 })();

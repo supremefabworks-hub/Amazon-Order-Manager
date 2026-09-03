@@ -4,9 +4,62 @@
 
 Chrome Manifest V3 Amazon / Amazon Business Order Manager and Refund Ledger.
 
-**Current source baseline: v0.18.1 after PR #12 merges.** Root source remains the active development source. The exact pre-GitHub v0.16.0 archive under `source-snapshots/v0.16.0/full/` is historical recovery material only.
+**Current source baseline: v0.18.2 after PR #16 merges.** Root source remains the active development source. The exact pre-GitHub v0.16.0 archive under `source-snapshots/v0.16.0/full/` is historical recovery material only.
 
 v0.18 preserves the complete v0.17 Amazon crawler/details/returns/dashboard contract and adds a verified Windows development auto-update channel.
+
+
+## v0.18.2 live multi-return + updater reliability release
+
+Live Amazon Business testing exposed two defects after v0.18.1:
+
+1. one Order ID with several independent return-status links was flattened into repeated/blended return rows, including the same wrong product title and an impossible aggregate refund greater than Amazon's canonical Order Details Refund Total;
+2. the installed v0.18.0 development copy did not update itself to the published v0.18.1 prerelease.
+
+PR #16 implements v0.18.2.
+
+### Return hierarchy
+
+The durable model is now:
+
+`order -> return group -> returned item(s)`
+
+- Return group identity: Amazon `rmaId` / `contractId` / normalized return token.
+- Returned-item identity: Amazon return-link `itemId`, with ASIN/title as supporting evidence.
+- Exact Order Details return-link item binding is trusted because it is physically scoped to the returned product block.
+- A later authoritative return page enriches lifecycle/refund evidence but may not silently replace conflicting trusted item identity; conflicts set `itemIdentityConflict` and require review.
+- Provisional and authoritative captures for the same `returnToken + itemId` intentionally share one record ID.
+- Redirects that strip query identity are repaired by carrying the original return-link token/item/contract/RMA hint into a single authoritative child capture.
+- Explicit return links suppress the extra broad strong-text provisional return on Order Details.
+- Per-order Refresh follows every unique same-order return child separately.
+
+### Refund accounting
+
+Order Details' explicit standalone `Refund Total` is the only canonical order-level refund source. Generic phrases such as `refund has been issued $X` are lifecycle evidence, not canonical order totals.
+
+Return records distinguish item-scoped and return-group-scoped amounts. A group amount is counted once; item amounts are summed only when item scope is proven. The dashboard prefers canonical `Refund Total`, displays unknown amounts as `—`, flags child/group conflicts and aggregates that exceed canonical Refund Total, and uses canonical expected refund for integrity-review totals.
+
+### Updater reliability
+
+The earlier v0.18.0 -> v0.18.1 unattended path failed live and is not considered validated. v0.18.2 therefore:
+
+- initializes the updater whenever the MV3 service worker boots,
+- recreates/verifies its 15-minute alarm,
+- also checks at Chrome startup and via a popup `Check development update now` action,
+- persists current/latest/host/check/install/reload/error diagnostics,
+- calls `chrome.runtime.reload()` synchronously after a verified newer install rather than from a delayed timer,
+- writes native-host diagnostics to `%LOCALAPPDATA%\SupremeFabWorks\AmazonOrderManagerDev\updater.log`,
+- supports native-host `--self-test`,
+- adds `Install.ps1 -DiagnoseOnly`, compatible with Windows PowerShell 5.1.
+
+Because the old channel did not self-repair, v0.18.2 requires one explicit updater/bootstrap repair on the Windows test PC. A later version must prove unattended update from v0.18.2 before Issue #10 closes.
+
+Live tracking:
+
+- Issue #7 — Amazon Business product acceptance.
+- Issue #10 — unattended updater proof remains open.
+- Issue #13 — v0.18.2 architecture/acceptance.
+- Issue #15 — v0.18.2 Windows repair + multi-return live retest.
 
 ## v0.18.1 live payment-card regression fix
 
@@ -67,11 +120,11 @@ dev-updater.js -> development update bridge
 `dev-updater.js`:
 
 - uses `nativeMessaging`,
-- checks at Chrome startup and every 15 minutes,
+- checks on MV3 worker startup, Chrome startup, manually from the popup, and every 15 minutes,
 - sends only updater protocol/version/extension-ID/reason metadata to the native host,
 - records update diagnostics under `devUpdateStatus`,
 - treats missing host, network failure, invalid response, or host error as non-fatal,
-- calls `chrome.runtime.reload()` only when the host reports a successful install whose version is strictly newer than the currently running manifest version,
+- calls `chrome.runtime.reload()` synchronously only when the host reports a successful install whose version is strictly newer than the currently running manifest version,
 - uses its own alarm name and does not enqueue Amazon crawl jobs.
 
 ### Windows native host
