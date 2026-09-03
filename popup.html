@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Amazon Refund Ledger</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body class="popup-body popup-simple-body">
+  <main class="popup-card">
+    <div class="eyebrow">AMAZON REFUND LEDGER · v0.16</div>
+    <h1>Order scan</h1>
+    <p class="muted" id="pageStatus">Visible Amazon order pages are captured automatically. Use Start to run the full lifetime scan.</p>
+
+    <div id="popupSummary" class="popup-summary-grid"></div>
+
+    <div id="backgroundStatus" class="result ok">Checking scanner…</div>
+    <div id="checkpointStatus" class="checkpoint-card">No checkpoint yet.</div>
+
+    <button id="scanToggleButton" class="primary">Start lifetime scan</button>
+    <button id="dashboardButton" class="secondary">Open dashboard</button>
+
+    <div id="result" class="result hidden"></div>
+    <p class="fineprint">Scan order: year → page → every View order details page → next history page. Return Center pages are not used as the canonical order source.</p>
+  </main>
+  <script src="storage.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
