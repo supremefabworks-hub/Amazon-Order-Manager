@@ -1,0 +1,57 @@
+name: Recover verified v0.16 source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/recover-v016-source.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconstruct and verify archived baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          parts=(source-snapshots/v0.16.0/full/amazon-refund-ledger-v0.16.0.zip.b64.part*)
+          test "${#parts[@]}" -eq 13
+          cat "${parts[@]}" | base64 --decode > /tmp/amazon-refund-ledger-v0.16.0.zip
+          echo '0ac308d98a4acf47fff51f5fd63410a9e9dc8e6105e7d6f17dcebd9b6e71ac42  /tmp/amazon-refund-ledger-v0.16.0.zip' | sha256sum -c -
+          test "$(stat -c '%s' /tmp/amazon-refund-ledger-v0.16.0.zip)" -eq 77670
+          rm -rf /tmp/aom-recovered
+          mkdir -p /tmp/aom-recovered
+          unzip -q /tmp/amazon-refund-ledger-v0.16.0.zip -d /tmp/aom-recovered
+          src=/tmp/aom-recovered/amazon-refund-ledger-v0.16.0
+          required=(
+            manifest.json background.js content.js parser.js storage.js
+            dashboard.html dashboard.js popup.html popup.js ui.css workflow-recorder.js
+            parser-test.js storage-test.js background-test.js state-machine-test.js reconciliation-test.js
+            BANK_RECONCILIATION_PROMPT.txt BANK_RECONCILIATION_SCHEMA.json
+          )
+          for file in "${required[@]}"; do
+            test -f "$src/$file" || { echo "Missing recovered file: $file" >&2; exit 1; }
+            cp "$src/$file" "$file"
+          done
+          printf 'Verified archive SHA-256: '
+          sha256sum /tmp/amazon-refund-ledger-v0.16.0.zip
+      - name: Commit recovered editable source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add manifest.json background.js content.js parser.js storage.js dashboard.html dashboard.js popup.html popup.js ui.css workflow-recorder.js parser-test.js storage-test.js background-test.js state-machine-test.js reconciliation-test.js BANK_RECONCILIATION_PROMPT.txt BANK_RECONCILIATION_SCHEMA.json
+          if git diff --cached --quiet; then
+            echo 'Root source already matches recovered v0.16.0 baseline.'
+          else
+            git commit -m 'Restore verified v0.16.0 source baseline'
+            git push origin HEAD:main
+          fi
