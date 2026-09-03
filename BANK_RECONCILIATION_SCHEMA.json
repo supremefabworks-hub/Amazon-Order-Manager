@@ -1,0 +1,6 @@
+{
+  "requestSchema": "amazon-refund-credit-check-request/v1",
+  "resultSchema": "amazon-refund-credit-check-result/v1",
+  "requestFields": ["requestId","returnRecordId","orderId","itemNames","expectedRefund","paymentCardLast4","refundIssuedDate","expectedCreditDate","amazonStage"],
+  "resultFields": ["requestId","returnRecordId","orderId","status","matchedAmount","postedDate","accountLast4","accountName","merchantName","confidence","reason"]
+}

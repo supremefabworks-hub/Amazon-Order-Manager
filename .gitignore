@@ -1,0 +1,9 @@
+.DS_Store
+*.zip
+amazon-orders-*.csv
+amazon-orders-*.json
+amazon-workflow-teach-log-*.json
+amazon-refund-credit-check-*.json
+amazon-refund-credit-result-*.json
+node_modules/
+dist/

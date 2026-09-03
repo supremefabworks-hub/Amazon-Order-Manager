@@ -1,0 +1,10 @@
+{
+  "name": "amazon-order-manager",
+  "version": "0.16.0",
+  "private": true,
+  "description": "Amazon / Amazon Business order and refund tracking Chrome extension",
+  "scripts": {
+    "test": "node parser-test.js && node storage-test.js && node background-test.js && node state-machine-test.js && node reconciliation-test.js",
+    "check": "npm test"
+  }
+}

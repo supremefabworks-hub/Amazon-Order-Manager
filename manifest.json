@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Amazon Refund Ledger",
+  "short_name": "Refund Ledger",
+  "version": "0.16.0",
+  "description": "Amazon order/refund ledger with direct authenticated Order Details fetching, proven Amazon pagination patterns, strict lifetime crawling, responsive dashboard, and secure bank-credit reconciliation bridge.",
+  "permissions": ["storage","activeTab","tabs","alarms","unlimitedStorage","webRequest"],
+  "host_permissions": ["https://amazon.com/*","https://www.amazon.com/*","https://business.amazon.com/*","https://*.amazon.com/*"],
+  "background": {"service_worker":"background.js"},
+  "action": {"default_title":"Amazon Refund Ledger","default_popup":"popup.html"},
+  "content_scripts": [{"matches":["https://amazon.com/*","https://www.amazon.com/*","https://business.amazon.com/*","https://*.amazon.com/*"],"js":["storage.js","parser.js","content.js","workflow-recorder.js"],"run_at":"document_idle"}],
+  "version_name": "0.16.0"
+}
