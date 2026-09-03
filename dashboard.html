@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Amazon Refund Ledger</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">AMAZON REFUND LEDGER · v0.16</div>
+      <h1>Orders + refund tracker</h1>
+      <p class="muted">One row per Amazon order. Every order is completed from View order details before the crawler advances to the next history page.</p>
+    </div>
+    <div class="top-actions">
+      <button id="startScanner" class="secondary">Start / resume</button>
+      <button id="stopScanner" class="secondary">Stop</button>
+      <button id="exportCsv" class="secondary">Export CSV</button>
+      <button id="exportJson" class="secondary">Export JSON</button>
+    </div>
+  </header>
+
+  <main class="dashboard-wrap">
+    <section class="stats" id="stats"></section>
+
+    <section class="panel view-menu" aria-label="Ledger views">
+      <button class="view-button" data-view="all">All orders <span id="navAllCount">0</span></button>
+      <button class="view-button" data-view="returns">Returns <span id="navReturnCount">0</span></button>
+      <button class="view-button" data-view="needs_review">Needs review <span id="navReviewCount">0</span></button>
+    </section>
+
+    <section class="panel scanner-row">
+      <div>
+        <strong>Lifetime history scanner</strong>
+        <div id="scannerStatus" class="muted small">Loading status…</div>
+        <div id="scannerCheckpoint" class="muted tiny">Checkpoint unavailable.</div>
+      </div>
+      <button id="restartScanner" class="secondary">Restart from current year</button>
+    </section>
+
+    <section class="panel bank-bridge-row">
+      <div class="bank-bridge-copy">
+        <strong>Bank credit verification</strong>
+        <div id="bankBridgeStatus" class="muted small">Refunds issued by Amazon can be matched against posted credits without putting bank credentials in this extension.</div>
+        <div class="muted tiny">Export a verification request, reconcile it with your connected financial accounts in ChatGPT, then import the result.</div>
+      </div>
+      <div class="bank-bridge-actions">
+        <button id="exportBankRequest" class="secondary">Export bank check</button>
+        <button id="importBankResult" class="secondary">Import bank result</button>
+        <input id="bankResultFile" type="file" accept="application/json,.json" hidden>
+      </div>
+    </section>
+
+    <section class="panel filters filters-one">
+      <input id="search" type="search" placeholder="Search item, order ID, status, or card">
+    </section>
+
+    <section class="ledger-card-panel">
+      <div id="ledgerBody" class="ledger-list" aria-live="polite"></div>
+      <div id="empty" class="empty hidden">No orders match this view.</div>
+    </section>
+
+    <section class="panel danger-zone">
+      <div><strong>Local data</strong><div class="muted small">Clearing removes only this extension's local ledger.</div></div>
+      <button id="clearLedger" class="danger">Clear ledger</button>
+    </section>
+  </main>
+
+  <script src="storage.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>
