@@ -121,12 +121,12 @@
       chunks.push(value);
     };
 
-    const addFocused = raw => {
+    const addFocused = (raw, allowStandaloneInstrument = false) => {
       const value = normalizeText(raw);
       if (!value) return;
       const lines = value.split('\n').map(line => line.trim()).filter(Boolean);
       for (let i = 0; i < lines.length; i += 1) {
-        if (instrumentRe.test(lines[i])) {
+        if (allowStandaloneInstrument && instrumentRe.test(lines[i])) {
           addChunk(lines[i]);
           continue;
         }
@@ -143,14 +143,14 @@
     ]) {
       try {
         for (const el of Array.from(container.querySelectorAll(selector))) {
-          addFocused(el.innerText || el.textContent || '');
+          addFocused(el.innerText || el.textContent || '', true);
           for (const attr of ['aria-label', 'title', 'alt']) {
-            try { addFocused(el.getAttribute?.(attr) || ''); } catch (_) {}
+            try { addFocused(el.getAttribute?.(attr) || '', true); } catch (_) {}
           }
           try {
             for (const child of Array.from(el.querySelectorAll?.('[aria-label], [title], img[alt]') || [])) {
               for (const attr of ['aria-label', 'title', 'alt']) {
-                try { addFocused(child.getAttribute?.(attr) || ''); } catch (_) {}
+                try { addFocused(child.getAttribute?.(attr) || '', true); } catch (_) {}
               }
             }
           } catch (_) {}
@@ -158,7 +158,7 @@
       } catch (_) {}
     }
 
-    if (!chunks.length) addFocused(container.innerText || container.textContent || '');
+    if (!chunks.length) addFocused(container.innerText || container.textContent || '', false);
     return chunks.join('\n');
   }
 
