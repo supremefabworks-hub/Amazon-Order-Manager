@@ -13,4 +13,12 @@ text = text.replace(
     1
 )
 path.write_text(text, encoding='utf-8')
-print('v0.17 legacy test expectations updated')
+
+recon_path = Path('reconciliation-test.js')
+recon = recon_path.read_text(encoding='utf-8')
+if "manifest.version !== '0.16.0'" not in recon:
+    raise RuntimeError('reconciliation manifest-version assertion not found')
+recon = recon.replace("manifest.version !== '0.16.0'", "manifest.version !== '0.17.0'", 1)
+recon_path.write_text(recon, encoding='utf-8')
+
+print('v0.17 legacy/release test expectations updated')
