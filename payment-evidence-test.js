@@ -33,6 +33,14 @@ const genericEvidence = p.extractPaymentEvidenceText(genericContainer);
 assert(genericEvidence === '', 'generic DOM card containers must not be payment evidence');
 assert(p.findCardLast4(genericEvidence) === null, 'generic DOM card container must not yield last4 1000');
 
+const outsidePaymentContainer = {
+  innerText: 'Order placed Sep 2, 2026\nOrder Total $19.99\nOld receipt note: Visa ending in 4821',
+  textContent: '',
+  querySelectorAll() { return []; }
+};
+const outsidePaymentEvidence = p.extractPaymentEvidenceText(outsidePaymentContainer);
+assert(outsidePaymentEvidence === '', 'standalone branded card text outside a payment/refund section must be ignored');
+
 const paymentSection = {
   innerText: 'Payment method\nVisa ending in 4321\nOrder total $44.00\nGift card promotion •••• 1000',
   textContent: '',
