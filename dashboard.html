@@ -14,7 +14,7 @@
       <p class="muted">One row per Amazon order. Every order is completed from View order details before the crawler advances to the next history page.</p>
     </div>
     <div class="top-actions">
-      <button id="startScanner" class="secondary">Start / resume</button>
+      <button id="startScanner" class="secondary">Start newest scan</button>
       <button id="stopScanner" class="secondary">Stop</button>
       <button id="exportCsv" class="secondary">Export CSV</button>
       <button id="exportJson" class="secondary">Export JSON</button>
@@ -34,12 +34,13 @@
     <section class="panel scanner-row">
       <div>
         <strong>Lifetime history scanner</strong>
+        <div class="muted tiny">Each new scan starts at the newest order, refreshes known overlaps once, then continues backward past the previous frontier.</div>
         <div id="scannerStatus" class="muted small">Loading status…</div>
         <div id="scannerCheckpoint" class="muted tiny">Checkpoint unavailable.</div>
       </div>
       <div class="scanner-actions">
         <button id="autoStartScanner" class="secondary" aria-pressed="false">Auto-start: Off</button>
-        <button id="restartScanner" class="secondary">Restart from current year</button>
+        <button id="restartScanner" class="secondary">Restart newest now</button>
       </div>
     </section>
 

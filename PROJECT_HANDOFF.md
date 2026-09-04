@@ -479,3 +479,11 @@ Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is expli
 - Completed IDs encountered on a recovered/overlap page are refresh anchors, not new orders; refresh at most once per lifetime run and continue.
 - Auto-start defaults OFF and only reacts to active user Amazon tabs; inactive/worker tabs cannot recursively trigger it. Manual Stop latches until explicit manual resume/restart.
 - v0.18.14 preserves ledger/crawl state across development version updates and clears only transient worker-tab identity.
+
+
+## v0.18.15 newest-first session contract
+- Issue #41 supersedes the manual-start entry behavior from #39.
+- Every NEW scan session starts current year page 1/newest order. The prior checkpoint is retained only as the historical frontier.
+- Known complete Order IDs are authoritatively refreshed once per session without increasing unique-order completion; new/incomplete orders follow the normal strict canonical path.
+- The pass does not stop at the old frontier; it continues backward into older/unscanned history.
+- Internal MV3/service-worker recovery of the SAME session remains checkpoint-based to avoid repeated rewinds caused by Chrome suspension.

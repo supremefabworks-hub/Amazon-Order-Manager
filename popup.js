@@ -101,8 +101,8 @@
       ? `${crawl.currentYear} · page ${crawl.currentPage || 1} · ${crawl.currentPageCompleted || 0}/${pageOrders || '?'} orders complete · ${crawl.ordersCompleted || 0} unique completed · ${crawl.overlapCount || 0} overlaps${crawl.lastCompletedOrderId ? ` · last ${crawl.lastCompletedOrderId}` : ''}`
       : 'No lifetime scan checkpoint yet.';
     if (crawl.active && !state.paused) scanToggleButton.textContent = 'Stop lifetime scan';
-    else if (crawl.active && state.paused) scanToggleButton.textContent = 'Resume lifetime scan';
-    else scanToggleButton.textContent = 'Start lifetime scan';
+    else if (crawl.active && state.paused) scanToggleButton.textContent = 'Start newest pass';
+    else scanToggleButton.textContent = 'Start newest pass';
   }
   async function openDashboard(view='all') {
     await chrome.tabs.create({ url: chrome.runtime.getURL(`dashboard.html?view=${encodeURIComponent(view)}`) }); window.close();

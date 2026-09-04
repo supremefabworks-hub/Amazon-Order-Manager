@@ -342,3 +342,11 @@ A user-testable development build may merge only after `npm test` and PR CI pass
 4. Enable `Auto-start: On`, open an active Amazon user tab, and verify the extension starts/resumes using a separate inactive worker tab. Verify worker/inactive tabs do not recursively trigger it.
 5. Press Stop and navigate Amazon; verify Auto-start does not undo the explicit stop. Press Start / resume and verify the latch clears.
 6. Complete a lifetime scan and verify normal Amazon navigation does not automatically restart another full historical crawl.
+
+
+## v0.18.15 live newest-first session acceptance
+1. Let an existing scan reach a deep checkpoint and note the year/page and unique-order count.
+2. Stop, then press Start newest scan. Verify the new session opens current year page 1/newest orders, while the prior deep page remains visible as the previous frontier.
+3. Verify known completed Order IDs are refreshed once in the session, return/replacement status updates if Amazon changed, and the unique-order count does not increase for overlaps.
+4. Verify the pass continues through the previous frontier into older/unscanned pages instead of stopping there.
+5. Interrupt only the MV3 worker/worker tab during a running session and verify internal recovery continues that same session rather than repeatedly rewinding to page 1.

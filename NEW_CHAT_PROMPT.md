@@ -151,3 +151,7 @@ Use one `Reset & Refresh` action only. It is an authoritative rebuild: preserve 
 
 ### Durable resume / Auto-start rule
 Treat the persisted crawl checkpoint (year, page, current history URL, Order-ID fingerprint, completed IDs, queued/current job) as authoritative. Resume must never silently fall back to page 1 unless the user explicitly chooses Restart. Auto-start is opt-in, reacts only to active user Amazon tabs, uses a separate inactive worker tab, respects manual Stop, and must not recursively trigger from extension-created worker tabs. Development upgrades preserve ledger/crawl state; transient tab IDs may be cleared.
+
+
+### v0.18.15 scanner entry rule
+Every newly started scan session begins at the newest Amazon order/current-year page 1. Preserve the old checkpoint as a frontier, refresh each known complete overlap exactly once per session, capture new/incomplete orders normally, and continue beyond the old frontier. Only an internal recovery of the same already-running session resumes its persisted in-flight/checkpoint job.

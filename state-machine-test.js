@@ -17,7 +17,7 @@ const chrome = {
   },
   alarms: { create: noop, onAlarm: { addListener: noop } },
   tabs: { onRemoved: { addListener: noop }, onUpdated: { addListener: noop, removeListener: noop } },
-  runtime: { getManifest: () => ({ version: '0.18.14' }), onMessage: { addListener: noop }, onStartup: { addListener: noop }, onInstalled: { addListener: noop } }
+  runtime: { getManifest: () => ({ version: '0.18.15' }), onMessage: { addListener: noop }, onStartup: { addListener: noop }, onInstalled: { addListener: noop } }
 };
 const sandbox = { chrome, URL, console, setTimeout: () => 0, clearTimeout: noop, Date, Math };
 vm.createContext(sandbox);
@@ -122,7 +122,7 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
   assert(store.backgroundScanState?.crawl?.currentPage === 31, 'version migration must preserve crawl checkpoint page');
   assert(store.backgroundScanState?.currentJob?.orderId === resumeOrderId, 'version migration must preserve interrupted current job for recovery');
   assert(store.arlWorkerTabId === undefined, 'version migration must clear stale transient worker tab ID');
-  assert(store.installedExtensionVersion === '0.18.14', 'version migration should store new manifest version');
+  assert(store.installedExtensionVersion === '0.18.15', 'version migration should store v0.18.15');
 
   await sandbox.resumePersistedCrawl('test-version-update');
   state = store.backgroundScanState;
@@ -134,26 +134,48 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
     running:false, paused:false, queue:[], currentJob:null,
     crawl:{ active:true, phase:'details', years:[2026,2025], currentYear:2026, currentPage:31, currentHistoryUrl:resumeUrl, currentPageOrderIds:[resumeOrderId], currentPageCompleted:1, ordersCompleted:1, completedOrders:{ [resumeOrderId]:{at:new Date().toISOString(),year:2026,page:31} }, seenOrders:{ [resumeOrderId]:{year:2026,page:31,pageKey:'2026:31'} }, seenPages:{'2026:31':resumeOrderId} }
   };
-  await sandbox.startOrResumeFullScan({ restart:false, source:'manual-resume' });
+  await sandbox.startOrResumeFullScan({ restart:false, source:'manual-resume', startYear:2026 });
   state = store.backgroundScanState;
-  assert(state.queue.length === 1 && state.queue[0].type === 'history' && state.queue[0].resumeRecovery === true, 'active empty queue must reconstruct one managed history checkpoint job');
-  assert(state.queue[0].historyPage === 31 && state.queue[0].url.includes('/pagination/31/'), 'checkpoint reconstruction must resume saved page 31');
-  assert(!state.queue[0].url.includes('/pagination/1/'), 'checkpoint reconstruction must not silently restart page 1');
+  const firstSessionId = state.crawl.sessionId;
+  assert(Boolean(firstSessionId), 'new scanner pass must persist a session identity');
+  assert(state.queue.length === 1 && state.queue[0].type === 'history', 'manual Start must create one newest history job');
+  assert(state.queue[0].historyPage === 1 && state.queue[0].url.includes('/pagination/1/'), 'manual Start must always begin at newest page 1');
+  assert(state.crawl.priorFrontier?.pageKey === '2026:31', 'old checkpoint must be preserved as a historical frontier, not used as the start page');
+  assert(state.crawl.ordersCompleted === 1, 'starting a new pass must preserve global unique-order completion count');
 
+  const newestUrl = 'https://www.amazon.com/gp/your-account/order-history#time/2026/pagination/1/';
   await sandbox.queueManagedHistoryResult({
-    scannedUrl: resumeUrl, historySelectedYear:2026, historyYears:[2026,2025], historyOrderIds:[resumeOrderId],
+    scannedUrl:newestUrl, historySelectedYear:2026, historyYears:[2026,2025], historyOrderIds:[resumeOrderId],
     detailLinks:[{orderId:resumeOrderId,url:resumeDetailUrl}], records:[]
   }, state.queue[0]);
   state = store.backgroundScanState;
-  const overlapRefreshes = state.queue.filter(j => j.type === 'detail' && j.orderId === resumeOrderId && j.resumeOverlapRefresh === true);
-  assert(overlapRefreshes.length === 1, 'known Order ID on recovered page must queue one authoritative overlap refresh');
-  assert(state.crawl.ordersCompleted === 1, 'overlap refresh must preserve the existing unique-order completion count without adding a second completion');
+  let overlapRefreshes = state.queue.filter(j => j.type === 'detail' && j.orderId === resumeOrderId && j.resumeOverlapRefresh === true);
+  assert(overlapRefreshes.length === 1, 'known Order ID encountered from newest must queue one authoritative refresh in the session');
+  assert(state.crawl.ordersCompleted === 1, 'known-order refresh must not increment the global unique-order completion count');
   await sandbox.queueManagedHistoryResult({
-    scannedUrl: resumeUrl, historySelectedYear:2026, historyYears:[2026,2025], historyOrderIds:[resumeOrderId],
+    scannedUrl:newestUrl, historySelectedYear:2026, historyYears:[2026,2025], historyOrderIds:[resumeOrderId],
     detailLinks:[{orderId:resumeOrderId,url:resumeDetailUrl}], records:[]
-  }, { historyYear:2026, historyPage:31, crawlManaged:true, resumeRecovery:true, resumeExpectedFingerprint:resumeOrderId });
+  }, { historyYear:2026, historyPage:1, crawlManaged:true, scanSessionId:firstSessionId, sessionPass:true });
   state = store.backgroundScanState;
-  assert(state.queue.filter(j => j.type === 'detail' && j.orderId === resumeOrderId && j.resumeOverlapRefresh === true).length === 1, 'same overlap must not be refreshed repeatedly in one lifetime crawl');
+  assert(state.queue.filter(j => j.type === 'detail' && j.orderId === resumeOrderId && j.resumeOverlapRefresh === true).length === 1, 'same known order must not refresh more than once in one session');
+
+  // A later explicit Start is a new session: refresh markers reset and the same known order is
+  // intentionally checked once again from the newest page.
+  state.paused = true; state.running = false; state.crawl.manualStop = true; store.backgroundScanState = state;
+  await sandbox.startOrResumeFullScan({ restart:false, source:'manual-resume', startYear:2026 });
+  state = store.backgroundScanState;
+  const secondSessionId = state.crawl.sessionId;
+  assert(secondSessionId && secondSessionId !== firstSessionId, 'second Start must create a new scan session');
+  assert(state.queue[0].historyPage === 1 && state.queue[0].url.includes('/pagination/1/'), 'every new session must start at newest page 1');
+  assert(Object.keys(state.crawl.overlapRefreshedOrders || {}).length === 0, 'per-session known-order refresh markers must reset on new Start');
+  await sandbox.queueManagedHistoryResult({
+    scannedUrl:newestUrl, historySelectedYear:2026, historyYears:[2026,2025], historyOrderIds:[resumeOrderId],
+    detailLinks:[{orderId:resumeOrderId,url:resumeDetailUrl}], records:[]
+  }, state.queue[0]);
+  state = store.backgroundScanState;
+  overlapRefreshes = state.queue.filter(j => j.type === 'detail' && j.orderId === resumeOrderId && j.resumeOverlapRefresh === true);
+  assert(overlapRefreshes.length === 1, 'same known order must be eligible for one refresh again in a new session');
+  assert(state.crawl.ordersCompleted === 1, 'repeat sessions must never double-count the known order');
 
   // Ledger-backed recovery: completed canonical data is a secondary identity index when crawl
   // metadata is missing. It must be adopted without counting a new order, then refreshed once.
@@ -176,7 +198,7 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
   store.backgroundScanState = { running:true, crawl:{active:true,currentYear:2025,currentPage:12,currentHistoryUrl:'https://www.amazon.com/gp/your-account/order-history#time/2025/pagination/12/'} };
   await sandbox.ensureDevelopmentVersionState('0.18.13');
   assert(store.ledger?.[0]?.orderId === '113-1111111-1111111' && store.backgroundScanState?.crawl?.currentPage === 12, 'previousVersion migration must preserve legacy ledger/checkpoint even before VERSION_KEY existed');
-  assert(store.installedExtensionVersion === '0.18.14', 'previousVersion migration should persist v0.18.14 version key');
+  assert(store.installedExtensionVersion === '0.18.15', 'previousVersion migration should persist v0.18.15 version key');
 
   console.log('strict crawl state-machine tests passed');
 })().catch(err => { console.error(err); process.exit(1); });

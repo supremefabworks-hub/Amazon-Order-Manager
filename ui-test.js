@@ -39,7 +39,7 @@ assert(background.includes("historyTerminalState !== 'cancelled'"), 'background 
 assert(background.includes('Number(record.purchaseAmount) === 0'), 'background terminal gate must require exact zero-dollar total');
 assert(dashboard.includes("stateKey = 'cancelled'"), 'dashboard must render terminal cancelled orders as Cancelled');
 assert(dashboard.includes('Terminal history'), 'dashboard must distinguish terminal history capture from Detailed');
-assert(dashboard.includes('orders complete'), 'dashboard checkpoint must include terminal-complete orders without calling them Detail captures');
+assert(dashboard.includes('unique orders stored'), 'dashboard checkpoint must count terminal-complete and canonical orders without calling every completion a Detail capture');
 
 console.log('ui regression tests passed');
 
@@ -127,5 +127,14 @@ assert(dashboardHtmlV01814.includes('id="autoStartScanner"') && dashboardHtmlV01
 assert(dashboardJsV01814.includes("type: 'ARL_SET_AUTO_START'") && dashboardJsV01814.includes('settings.autoStartOnAmazon'), 'dashboard Auto-start button must persist the setting');
 assert(storageV01814.includes('autoStartOnAmazon: false'), 'Auto-start must default OFF');
 assert(contentV01814.includes("type: 'ARL_AMAZON_PAGE_READY'"), 'Amazon content script must announce user-page readiness to Auto-start logic');
-assert(dashboardJsV01814.includes('resume #${crawl.resumeCount || 1}'), 'scanner checkpoint UI must expose resume diagnostics');
+assert(dashboardJsV01814.includes('worker recovery #${crawl.resumeCount || 1}'), 'scanner checkpoint UI must expose internal worker-recovery diagnostics without calling a new session a resume');
 console.log('v0.18.14 Auto-start/resume UI regressions passed');
+
+
+const htmlV01815 = fs.readFileSync(__dirname + '/dashboard.html', 'utf8');
+const dashboardV01815 = fs.readFileSync(__dirname + '/dashboard.js', 'utf8');
+assert(htmlV01815.includes('Start newest scan'), 'scanner primary action must state that a new pass starts newest');
+assert(htmlV01815.includes('Restart newest now'), 'explicit restart action must also state newest-first behavior');
+assert(htmlV01815.includes('refreshes known overlaps once'), 'scanner UI must explain newest-first overlap refresh behavior');
+assert(dashboardV01815.includes('previous frontier') && dashboardV01815.includes('known orders refreshed'), 'scanner status must expose frontier and per-session refresh progress');
+console.log('v0.18.15 newest-session UI regressions passed');
