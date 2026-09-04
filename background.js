@@ -1124,6 +1124,7 @@ async function forceResetRefreshOrder(orderId) {
       }
       throw error;
     } finally {
+      try { await chrome.tabs.remove(tabId); } catch (_) {}
       processing = false;
       const state = ensureCrawl(await getState().catch(() => defaultState()));
       if (!state.paused && state.queue?.length) scheduleSoon(randomBetween(75, 250));

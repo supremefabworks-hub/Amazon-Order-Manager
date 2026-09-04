@@ -146,4 +146,5 @@ assert(backgroundSourceV01813.includes("message.type === 'ARL_RESET_REFRESH_ORDE
 assert(!backgroundSourceV01813.includes("message.type === 'ARL_REFRESH_ORDER'"), 'old standalone refresh message path must be removed');
 assert(backgroundSourceV01813.includes('while (processing && Date.now() < waitDeadline)') && backgroundSourceV01813.includes('processing = true'), 'manual rebuild must share the serial crawler lock');
 assert(backgroundSourceV01813.includes("processingError: `reset-refresh:"), 'failed rebuild must retain an Errors-view shell');
+assert(backgroundSourceV01813.includes('await chrome.tabs.remove(tabId)'), 'Reset & Refresh must close its temporary inactive Amazon tab before releasing the lock');
 console.log('v0.18.13 reset-refresh background regressions passed');
