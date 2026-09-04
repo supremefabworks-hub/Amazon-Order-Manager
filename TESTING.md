@@ -250,11 +250,19 @@ A user-testable development build may merge only after `npm test` and PR CI pass
 - Leave v0.18.2 installed and do not manually reload/replace it after `dev-v0.18.3` publishes; confirm Chrome advances to v0.18.3 through the native updater.
 
 
-## v0.18.4 terminal cancelled order
+## v0.18.5 terminal cancelled order
 
-1. Start from a clean v0.18.4 development ledger and run the lifetime scan.
+1. Start from a clean v0.18.5 development ledger and run the lifetime scan.
 2. On 2026 page 6, order `112-3886192-2097013` must be accepted from its own history card only when it shows the same Order ID, exact Cancelled/Canceled state, and `$0.00` Total with no Detail URL.
 3. The row must show `Cancelled`, `$0.00`, `Terminal history`; `Detailed` must not appear and Details/Refresh must be disabled.
 4. The crawler must continue to the next page/year instead of stopping on that order.
 5. A synthetic/nonzero/ambiguous cancellation fixture without a Detail URL must still stop with the exact missing Order ID.
 6. For updater acceptance on the second PC, start at v0.18.3 and do not reinstall/reload; confirm `current\manifest.json` and Chrome both move to 0.18.4 automatically.
+
+
+## v0.18.5 live acceptance
+1. Confirm the installed build auto-updates to v0.18.5 without reinstall/reload.
+2. Restart a clean lifetime scan and verify 2026 page 6 passes order `112-3886192-2097013` as `Cancelled` / `Terminal history` / `$0.00` and continues to page 7.
+3. Confirm a normal order without a real Detail URL still hard-stops with its exact Order ID.
+4. Verify RAMPOW `111-1110034-5588263` and Milton `111-8528386-2632255` no longer show `Item identity conflict` when return-page ASIN evidence is not directly bound to the returned item.
+5. Confirm a test fixture with directly bound contradictory ASIN evidence still enters Needs Review.

@@ -112,12 +112,11 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
     itemIdentitySource: 'order-detail-return-link', status: 'return_in_progress', returnStage: 'started', provisionalReturn: true
   };
   await s.upsertRecords([trustedReturn]);
-  await s.upsertRecords([{ ...trustedReturn, itemNames: ['Wrong Return Page Sibling'], asins: ['B000000099'], itemIdentitySource: 'return-page-item', authoritativeReturnCapture: true, provisionalReturn: false, status: 'refunded', returnStage: 'refund_issued' }]);
+  await s.upsertRecords([{ ...trustedReturn, itemNames: ['Wrong Return Page Sibling'], asins: ['B000000099'], itemIdentitySource: 'return-page-item', itemAsinEvidenceSource: null, authoritativeReturnCapture: true, provisionalReturn: false, status: 'refunded', returnStage: 'refund_issued' }]);
   const trustedMerged = (await s.getLedger()).find(r => r.recordId === trustedReturn.recordId);
-  assert(trustedMerged.itemNames[0] === 'Trusted Order Details Item', 'exact Order Details return-link identity must survive conflicting return-page item text');
-  assert(trustedMerged.asins[0] === 'B000000010', 'trusted return-link ASIN must survive a conflicting authoritative-page ASIN');
-  assert(trustedMerged.itemIdentityConflict === true, 'conflicting return-page identity must be flagged instead of silently replacing trusted identity');
-  assert(s.needsCreditReview(trustedMerged) === true, 'item identity conflicts must require review');
+  assert(trustedMerged.itemNames[0] === 'Trusted Order Details Item', 'exact Order Details return-link identity must survive weak return-page item text');
+  assert(trustedMerged.asins[0] === 'B000000010', 'trusted return-link ASIN must survive weak broad return-page ASIN contamination');
+  assert(trustedMerged.itemIdentityConflict !== true, 'weak/unbound return-page ASIN must not create an item identity conflict');
 
   const stableTrusted = {
     recordId: 'return:113-7000000-3000001:rma-stable:item-item-b', recordType: 'return', orderId: '113-7000000-3000001',
@@ -152,7 +151,7 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
     itemNames: ['Trusted Product'], asins: ['B000000001']
   };
   await s.upsertRecords([asinConflictBase]);
-  await s.upsertRecords([{ ...asinConflictBase, asins: ['B000000002'], itemNames: ['Different Product'], itemIdentitySource: 'return-page-item', provisionalReturn: false, authoritativeReturnCapture: true }]);
+  await s.upsertRecords([{ ...asinConflictBase, asins: ['B000000002'], itemNames: ['Different Product'], itemIdentitySource: 'return-page-item', itemAsinEvidenceSource: 'return-item-data-asin', provisionalReturn: false, authoritativeReturnCapture: true }]);
   const asinConflict = (await s.getLedger()).find(r => r.recordId === asinConflictBase.recordId);
   assert(asinConflict.itemIdentityConflict === true, 'contradictory non-empty ASIN evidence for the same returnItemId must remain reviewable');
 
