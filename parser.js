@@ -684,7 +684,7 @@
       if (!existing) byAsin.set(info.asin, candidate);
       else byAsin.set(info.asin, {
         ...existing,
-        itemName: existing.itemName || candidate.itemName,
+        itemName: String(candidate.itemName || '').length > String(existing.itemName || '').length ? candidate.itemName : existing.itemName,
         quantity: existing.quantity ?? candidate.quantity,
         itemAmount: existing.itemAmount ?? candidate.itemAmount,
         fulfillmentStatus: existing.fulfillmentStatus || candidate.fulfillmentStatus

@@ -54,3 +54,5 @@ assert(dashboard.includes('orderProductStatusMarkup'), 'dashboard must render pu
 assert(dashboard.includes("'Not returned'"), 'non-returned purchased products must stay visible with Not returned state');
 assert(dashboard.includes('returnedProductCount'), 'order summary must expose how many purchased products were returned');
 assert(css.includes('v0.18.7 per-product order status'), 'per-product order rows must have responsive no-horizontal-scroll styling');
+
+assert(dashboard.includes('row.strongUnmatchedReturnIdentity'), 'strong unmatched returned items must contribute canonical expected refund to Needs Review dollars');

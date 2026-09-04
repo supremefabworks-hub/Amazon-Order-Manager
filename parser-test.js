@@ -732,3 +732,12 @@ assert(v0187LineItems[1].itemAmount === 19.99, 'direct labeled item price may be
 assert(v0187LineItems[2].itemAmount == null, 'item price must remain unknown when not directly proven');
 assert(v0187LineItems.every(item => item.fulfillmentStatus && item.fulfillmentStatus.startsWith('Delivered')), 'per-product fulfillment status should remain item scoped');
 console.log('v0.18.7 evidence and multi-product parser regressions passed');
+
+
+// v0.18.7 DOM milestone evidence: only the stage with a real Amazon checkmark completes.
+const v0187InitiatedRow = { innerText:'Aug 31\nInitiated', textContent:'Aug 31\nInitiated', parentElement:null };
+const v0187Check = { parentElement:v0187InitiatedRow };
+const v0187MilestoneDom = { querySelectorAll(selector) { return selector.includes('milestone_checkmark') ? [v0187Check] : []; } };
+const v0187DomDone = p.extractCompletedReturnMilestonesFromDom(v0187MilestoneDom);
+assert(v0187DomDone.started === true, 'Amazon checkmark next to Initiated must complete Initiated');
+assert(v0187DomDone.shipped === false && v0187DomDone.received === false && v0187DomDone.refundIssued === false, 'one Initiated checkmark must not spill into later static labels');

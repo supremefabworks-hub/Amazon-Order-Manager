@@ -49,6 +49,9 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   assert(Array.isArray(ledger[0].orderItems) && ledger[0].orderItems.length === 1, 'structured purchased items must survive storage merge as objects');
   assert(ledger[0].orderItems[0].quantity === 2 && ledger[0].orderItems[0].itemAmount == null, 'known quantity and unknown item money must remain distinct');
 
+  const policyOnlyStage = s.getReturnStage({ recordType:'return', statusText:'Drop off your return by Sep 8\nWe will issue your refund within 30 days from the time you have dropped off your return.\nDrop off\nReturn received\nRefund issued\nRefund credited' });
+  assert(policyOnlyStage === 'started', 'storage fallback must not promote future/policy/static return text beyond Initiated');
+
   const retBase = {
     recordId: 'return:114-4444444-5555555:example-part', recordType: 'return', orderId: '114-4444444-5555555',
     itemNames: ['Example Part'], refundAmount: 42.00, status: 'return_in_progress', returnStage: 'started', statusText: 'Return request confirmed'

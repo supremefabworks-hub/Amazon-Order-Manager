@@ -194,7 +194,7 @@
         itemStates: itemJoin.items, unmatchedReturnGroups: itemJoin.unmatchedReturnGroups, returnedProductCount: itemJoin.returnedProductCount,
         itemNames, orderItemNames, returnedItemNames, searchItemNames: uniqueStrings([...orderItemNames, ...returnedItemNames]),
         orderTotal: order?.purchaseAmount ?? null, refundAmount, canonicalRefundTotal, childRefundAmount,
-        refundAmountMismatch, itemIdentityConflict, groupAmountConflict,
+        refundAmountMismatch, itemIdentityConflict, groupAmountConflict, strongUnmatchedReturnIdentity,
         cardLast4: order?.cardLast4 || returnRecords.find(r => r.cardLast4)?.cardLast4 || null,
         amazonStatus: statusTexts.length ? statusTexts.join(' · ') : (order?.statusText || order?.status || '—'),
         detailComplete: Boolean(order?.detailScanComplete), detailScannedAt: order?.detailScannedAt || null,
@@ -301,7 +301,7 @@
   }
   function needsReviewExpectedAmount(row) {
     const recordTotal = returnRecordAmountTotal((row.returns || []).filter(r => storage.needsCreditReview(r)));
-    if (row.refundAmountMismatch || row.itemIdentityConflict || row.groupAmountConflict) {
+    if (row.refundAmountMismatch || row.itemIdentityConflict || row.groupAmountConflict || row.strongUnmatchedReturnIdentity) {
       const orderExpected = row.refundAmount;
       if (orderExpected !== null && orderExpected !== undefined && orderExpected !== '' && Number.isFinite(Number(orderExpected))) return Number(orderExpected);
     }
