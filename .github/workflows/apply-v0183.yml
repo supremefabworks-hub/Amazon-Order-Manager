@@ -1,0 +1,39 @@
+name: Apply v0.18.3 live acceptance fixes
+
+on:
+  push:
+    branches: [v0183-live-acceptance-fixes]
+    paths:
+      - '.github/workflows/apply-v0183.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0183-live-acceptance-fixes
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply v0.18.3 fixes
+        run: python3 tools/apply_v0183.py
+      - name: Validate generated source
+        run: |
+          node --check parser.js
+          node --check storage.js
+          node --check dashboard.js
+          node --check content.js
+          node --check background.js
+          npm test
+      - name: Commit durable implementation and remove temporary machinery
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm tools/apply_v0183.py .github/workflows/apply-v0183.yml
+          git add -A
+          git commit -m 'Implement v0.18.3 live Amazon acceptance fixes [v0183-generated]'
+          git push origin HEAD:v0183-live-acceptance-fixes
