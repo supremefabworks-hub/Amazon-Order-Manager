@@ -84,6 +84,10 @@
         quantity: Number.isInteger(quantity) && quantity > 0 ? quantity : null,
         itemAmount: Number.isFinite(itemAmount) ? itemAmount : null,
         fulfillmentStatus: raw.fulfillmentStatus ? String(raw.fulfillmentStatus).slice(0, 180) : null,
+        replacementStage: ['detected','requested','ordered','shipped','delivered','complete'].includes(String(raw.replacementStage || '').toLowerCase()) ? String(raw.replacementStage).toLowerCase() : null,
+        replacementStatusText: raw.replacementStatusText ? String(raw.replacementStatusText).slice(0, 220) : null,
+        replacementNoReturnRequired: Boolean(raw.replacementNoReturnRequired),
+        replacementSource: raw.replacementSource ? String(raw.replacementSource).slice(0, 80) : null,
         source: raw.source ? String(raw.source).slice(0, 80) : null
       });
     }

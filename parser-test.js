@@ -784,3 +784,36 @@ p.applyDomReturnMilestones(v0189Rampow, v0189TimelineContainer('$7.53 refund iss
 assert(v0189Rampow.returnStage === 'refund_issued' && v0189Rampow.returnMilestones.credited.done === false, 'issued refund must not become credited from future checkmark markup');
 assert(p.extractCompletedReturnMilestonesFromDom(v0189TimelineContainer('Initiated\nDropped off', ['Initiated','Dropped off'], [1])).shipped === false, 'explicitly hidden milestone checkmarks must not count');
 console.log('v0.18.9 authoritative milestone regressions passed');
+
+
+// v0.18.11 replacement workflow regressions (synthetic fixture only).
+const replacementComplete = p.replacementEvidenceFromText(`Replacement complete\nThere's no need to return your item. Your replacement is complete.`);
+assert(replacementComplete.detected && replacementComplete.stage === 'complete', 'replacement-complete text must be detected as replacement state');
+assert(replacementComplete.noReturnRequired === true, 'explicit no-return-required replacement must be recognized');
+const replacementNeedsOriginal = p.replacementEvidenceFromText(`Replacement ordered\nReturn the original item by Sep 20.`);
+assert(replacementNeedsOriginal.detected && replacementNeedsOriginal.noReturnRequired === false, 'replacement without explicit no-return evidence must remain return-eligible');
+
+const replacementProductAnchor = {
+  getAttribute(name) { return name === 'href' ? '/dp/B0ABC12345' : null; },
+  href:'/dp/B0ABC12345', innerText:'Synthetic Hydraulic Steering Rack', textContent:'Synthetic Hydraulic Steering Rack', parentElement:null
+};
+const replacementStatusAnchorV1811 = {
+  getAttribute(name) { return name === 'href' ? '/spr/returns/prep?orderId=111-0000000-0000001&contractId=synthetic-contract&itemId=synthetic-item' : null; },
+  href:'/spr/returns/prep?orderId=111-0000000-0000001&contractId=synthetic-contract&itemId=synthetic-item',
+  innerText:'View return/refund status', textContent:'View return/refund status', parentElement:null
+};
+const replacementBlockText = `Order # 111-0000000-0000001\nReplacement complete\nThere's no need to return your item. Your replacement is complete.\nSynthetic Hydraulic Steering Rack`;
+const replacementBlock = {
+  innerText: replacementBlockText, textContent: replacementBlockText, parentElement:null,
+  querySelectorAll(selector) {
+    if (selector === 'a[href]') return [replacementProductAnchor, replacementStatusAnchorV1811];
+    if (selector.includes('/dp/') || selector.includes('/gp/product/') || selector.includes('/product/')) return [replacementProductAnchor];
+    return [];
+  }
+};
+replacementProductAnchor.parentElement = replacementBlock;
+replacementStatusAnchorV1811.parentElement = replacementBlock;
+const replacementLinkDoc = { querySelectorAll(selector) { return selector === 'a[href]' ? [replacementStatusAnchorV1811] : []; } };
+const syntheticReplacementLinks = p.extractReturnStatusLinks(replacementLinkDoc, 'https://www.amazon.com/gp/your-account/order-details?orderID=111-0000000-0000001');
+assert(syntheticReplacementLinks.length === 1 && syntheticReplacementLinks[0].replacementOnly === true, 'no-return replacement management link must be marked replacement-only');
+console.log('v0.18.11 replacement parser regressions passed');

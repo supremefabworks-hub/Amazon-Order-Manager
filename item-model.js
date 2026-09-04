@@ -29,6 +29,10 @@
       quantity: Number.isInteger(Number(item.quantity)) && Number(item.quantity) > 0 ? Number(item.quantity) : null,
       itemAmount: item.itemAmount === null || item.itemAmount === undefined || item.itemAmount === '' || !Number.isFinite(Number(item.itemAmount)) ? null : Number(item.itemAmount),
       fulfillmentStatus: clean(item.fulfillmentStatus) || null,
+      replacementStage: ['detected','requested','ordered','shipped','delivered','complete'].includes(clean(item.replacementStage).toLowerCase()) ? clean(item.replacementStage).toLowerCase() : null,
+      replacementStatusText: clean(item.replacementStatusText) || null,
+      replacementNoReturnRequired: Boolean(item.replacementNoReturnRequired),
+      replacementSource: clean(item.replacementSource) || null,
       source: clean(item.source) || null
     }));
 
@@ -42,6 +46,10 @@
       quantity: null,
       itemAmount: null,
       fulfillmentStatus: null,
+      replacementStage: null,
+      replacementStatusText: null,
+      replacementNoReturnRequired: false,
+      replacementSource: null,
       source: 'legacy-order-item'
     }));
   }

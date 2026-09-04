@@ -2,7 +2,7 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.10 candidate for Issue #31.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.11 candidate for Issue #33.** GitHub is the source of truth and chat sessions are disposable.
 
 Current live acceptance trackers:
 
@@ -11,6 +11,7 @@ Current live acceptance trackers:
 - **#25 — v0.18.7 acceptance** for faster serial crawl pacing and per-product order status.
 - **#29 — v0.18.9 acceptance** for authoritative return progress and complete-only ledger behavior.
 - **#31 — v0.18.10 acceptance** for consolidated dashboard metrics and four user-facing views: Orders, Returns, Return review, Errors.
+- **#33 — v0.18.11 acceptance** for replacement detection and replacement-vs-return separation.
 
 Updater Issue **#10 is closed** after unattended live update from v0.18.3 to v0.18.4 succeeded on the second Windows PC.
 
@@ -21,9 +22,9 @@ Use [`NEW_CHAT_PROMPT.md`](NEW_CHAT_PROMPT.md). `SESSION_PROTOCOL.md` defines ma
 ## Resume development
 
 1. Read `AGENTS.md`, `PROJECT_HANDOFF.md`, `README.md`, `TESTING.md`, and `SESSION_PROTOCOL.md`.
-2. Read Issues #7, #23, #25, #29, and #31 and any newer issue that supersedes their scope.
+2. Read Issues #7, #23, #25, #29, #31, and #33 and any newer issue that supersedes their scope.
 3. Inspect root source, `manifest.json`, recent commits, open PRs/issues, and tests before editing.
-4. Root v0.18.10 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
+4. Root v0.18.11 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
 5. Run `npm test` before packaging or merging changes.
 6. Every user-testable development revision must bump both `manifest.json` and `package.json` to the same newer Chrome version.
 7. Keep implementation, regression tests, docs, issue state, and handoff synchronized.
@@ -223,3 +224,8 @@ v0.18.9 removes checkmark-count inference from detached Amazon return HTML. DOM 
 ## v0.18.10 dashboard metric cleanup
 
 v0.18.10 removes the redundant `Order details` stat because complete orders are already fully processed canonical orders. The single `Complete orders` stat keeps the completed-order count plus captured-order-dollar total. Processing remains an internal crawler state and is no longer a user-facing tab/stat. User navigation is exactly `Orders | Returns | Return review | Errors`. Issue #31 tracks live acceptance.
+
+
+## v0.18.11 replacement workflow separation
+
+Amazon replacements are modeled independently from refund returns. Product-scoped Order Details evidence such as `Replacement requested`, `Replacement shipped`, `Replacement delivered`, and `Replacement complete` is retained on the purchased item. A replacement-management `/spr/returns/prep` link is excluded from return/refund processing only when the same product context affirmatively proves that no return is required. Replacement workflows without that proof remain return-eligible because some replacements require the original item back. Replacement-only orders do not count as Returns, do not show a synthetic `$0.00` refund, and expose replacement state in the order/product UI and status filter. Issue #33 tracks live acceptance.

@@ -169,5 +169,11 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   assert(s.hasAmazonBankConflict(bankBeforeIssued), 'bank credit before Amazon refund-issued must be conflict');
   assert(s.needsCreditReview(bankBeforeIssued), 'bank/Amazon conflict must need review');
 
+  const replacementOrder = { recordId:'order:111-0000000-0000002', recordType:'order', orderId:'111-0000000-0000002', detailScanComplete:true, orderItems:[{ itemKey:'asin:B0ABC12345', asin:'B0ABC12345', itemName:'Synthetic Steering Rack', fulfillmentStatus:'Delivered', replacementStage:'complete', replacementStatusText:'Replacement complete', replacementNoReturnRequired:true, replacementSource:'order-details-product-block', source:'order-details-product-anchor' }] };
+  await s.upsertRecords([replacementOrder]);
+  const storedReplacement = (await s.getLedger()).find(r => r.recordId === replacementOrder.recordId);
+  assert(storedReplacement.orderItems[0].replacementStage === 'complete', 'storage must preserve product replacement stage');
+  assert(storedReplacement.orderItems[0].replacementNoReturnRequired === true, 'storage must preserve no-return-required replacement evidence');
+
   console.log('storage tests passed');
 })().catch(error => { console.error(error); process.exit(1); });
