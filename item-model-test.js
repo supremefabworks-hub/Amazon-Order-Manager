@@ -27,4 +27,8 @@ assert(truncated.returnedProductCount === 1, 'conservative long-title prefix mat
 
 const unmatched = model.joinOrderItems(order, [{ key:'unknown', asins:['B999999999'], itemNames:['Different Product'], representative:{returnStage:'started'}, records:[] }]);
 assert(unmatched.unmatchedReturnGroups.length === 1 && unmatched.unmatchedReturnGroups[0].identityStrength === 'strong', 'contradictory strong returned ASIN must stay visible as unmatched/reviewable');
+const replacementModel = model.normalizeOrderItems({ orderItems:[{ itemKey:'asin:B0ABC12345', asin:'B0ABC12345', itemName:'Synthetic Steering Rack', replacementStage:'complete', replacementStatusText:'Replacement complete', replacementNoReturnRequired:true, replacementSource:'order-details-product-block' }] });
+assert(replacementModel.length === 1 && replacementModel[0].replacementStage === 'complete', 'item model must preserve replacement stage');
+assert(replacementModel[0].replacementNoReturnRequired === true, 'item model must preserve no-return-required evidence');
+
 console.log('item model tests passed');

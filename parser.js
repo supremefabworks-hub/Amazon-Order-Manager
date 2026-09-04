@@ -703,6 +703,74 @@
     return null;
   }
 
+
+  const REPLACEMENT_STAGE_RANK = { unknown: 0, detected: 1, requested: 2, ordered: 2, shipped: 3, delivered: 4, complete: 5 };
+
+  function replacementStageRank(stage) {
+    return REPLACEMENT_STAGE_RANK[String(stage || '').toLowerCase()] ?? 0;
+  }
+
+  function replacementEvidenceFromText(text) {
+    const normalized = normalizeText(text);
+    const lines = normalized.split('\n').map(line => line.trim()).filter(Boolean);
+    const noReturnRequired = lines.some(line =>
+      /(?:there(?:'|’)?s|there is)\s+no need to return (?:your )?(?:item|product)|(?:you (?:do not|don't|don’t) need to|no need to) return (?:the |your )?(?:original )?(?:item|product)|no return (?:is )?required/i.test(line)
+    );
+    const stageRules = [
+      ['complete', /(?:replacement (?:is )?complete|your replacement (?:is )?complete|replacement (?:has been|was) completed|replacement complete)/i],
+      ['delivered', /(?:replacement (?:has been|was|is) delivered|replacement delivered)/i],
+      ['shipped', /(?:replacement (?:has been|was|is) shipped|replacement shipped|replacement is on the way)/i],
+      ['ordered', /(?:replacement (?:has been|was|is) ordered|replacement ordered|replacement order (?:has been|was) placed|replacement approved)/i],
+      ['requested', /(?:replacement (?:has been|was|is) requested|replacement requested|replacement request (?:is )?(?:confirmed|approved)|we(?:'|’)ll send (?:you )?a replacement|we will send (?:you )?a replacement|replacement (?:is )?being prepared|replacement arriving)/i]
+    ];
+    let stage = null;
+    let statusText = null;
+    for (const [candidateStage, pattern] of stageRules) {
+      const line = lines.find(value => pattern.test(value));
+      if (line) { stage = candidateStage; statusText = line.slice(0, 220); break; }
+    }
+    if (!stage && noReturnRequired && /replacement/i.test(normalized)) {
+      stage = 'detected';
+      statusText = lines.find(line => /replacement/i.test(line))?.slice(0, 220) || 'Replacement detected';
+    }
+    return {
+      detected: Boolean(stage),
+      stage: stage || null,
+      statusText: statusText || null,
+      noReturnRequired: Boolean(stage && noReturnRequired)
+    };
+  }
+
+  function strongerReplacement(existing, incoming) {
+    const a = existing || { detected: false, stage: null, statusText: null, noReturnRequired: false };
+    const b = incoming || { detected: false, stage: null, statusText: null, noReturnRequired: false };
+    const winner = replacementStageRank(b.stage) >= replacementStageRank(a.stage) ? b : a;
+    return {
+      detected: Boolean(a.detected || b.detected),
+      stage: winner.stage || a.stage || b.stage || null,
+      statusText: winner.statusText || a.statusText || b.statusText || null,
+      noReturnRequired: Boolean(a.noReturnRequired || b.noReturnRequired)
+    };
+  }
+
+  function nearestReplacementEvidence(anchor) {
+    let current = anchor?.parentElement || null;
+    let fallback = null;
+    for (let depth = 0; current && depth < 9; depth += 1, current = current.parentElement) {
+      const text = normalizeText(current.innerText || current.textContent || '');
+      if (!text || text.length > 7000) continue;
+      let productLinks = [];
+      try { productLinks = Array.from(current.querySelectorAll?.('a[href*="/dp/"], a[href*="/gp/product/"], a[href*="/product/"]') || []); } catch (_) {}
+      const asins = new Set(productLinks.map(link => productAnchorInfo(link)?.asin).filter(Boolean));
+      if (asins.size > 1) break;
+      const evidence = replacementEvidenceFromText(text);
+      if (!evidence.detected) continue;
+      if (asins.size === 1 && evidence.noReturnRequired) return evidence;
+      if (!fallback) fallback = evidence;
+    }
+    return fallback || { detected: false, stage: null, statusText: null, noReturnRequired: false };
+  }
+
   function extractOrderLineItems(container) {
     if (!container?.querySelectorAll) return [];
     let anchors = [];
@@ -720,6 +788,10 @@
         quantity: extractDirectItemQuantity(text),
         itemAmount: extractDirectItemAmount(itemContainer, text),
         fulfillmentStatus: extractDirectFulfillmentStatus(text),
+        replacementStage: replacementEvidenceFromText(text).stage,
+        replacementStatusText: replacementEvidenceFromText(text).statusText,
+        replacementNoReturnRequired: replacementEvidenceFromText(text).noReturnRequired,
+        replacementSource: replacementEvidenceFromText(text).detected ? 'order-details-product-block' : null,
         source: 'order-details-product-anchor'
       };
       const existing = byAsin.get(info.asin);
@@ -729,7 +801,19 @@
         itemName: String(candidate.itemName || '').length > String(existing.itemName || '').length ? candidate.itemName : existing.itemName,
         quantity: existing.quantity ?? candidate.quantity,
         itemAmount: existing.itemAmount ?? candidate.itemAmount,
-        fulfillmentStatus: existing.fulfillmentStatus || candidate.fulfillmentStatus
+        fulfillmentStatus: existing.fulfillmentStatus || candidate.fulfillmentStatus,
+        ...(() => {
+          const replacement = strongerReplacement(
+            { detected: Boolean(existing.replacementStage), stage: existing.replacementStage, statusText: existing.replacementStatusText, noReturnRequired: existing.replacementNoReturnRequired },
+            { detected: Boolean(candidate.replacementStage), stage: candidate.replacementStage, statusText: candidate.replacementStatusText, noReturnRequired: candidate.replacementNoReturnRequired }
+          );
+          return {
+            replacementStage: replacement.stage,
+            replacementStatusText: replacement.statusText,
+            replacementNoReturnRequired: replacement.noReturnRequired,
+            replacementSource: replacement.detected ? (existing.replacementSource || candidate.replacementSource || 'order-details-product-block') : null
+          };
+        })()
       });
     }
     return Array.from(byAsin.values()).slice(0, 60);
@@ -997,6 +1081,8 @@
       if (seen.has(key)) continue;
       seen.add(key);
       const evidence = nearestReturnItemEvidence(a);
+      const replacement = nearestReplacementEvidence(a);
+      const replacementOnly = Boolean(isOrderDetailPage(baseUrl) && replacement.detected && replacement.noReturnRequired);
       results.push({
         orderId,
         url,
@@ -1008,7 +1094,12 @@
         asins: evidence.asins,
         itemIdentitySource: (evidence.itemNames.length || evidence.asins.length)
           ? (isOrderDetailPage(baseUrl) ? 'order-detail-return-link' : 'return-link')
-          : null
+          : null,
+        replacementContext: replacement.detected,
+        replacementStage: replacement.stage,
+        replacementStatusText: replacement.statusText,
+        replacementNoReturnRequired: replacement.noReturnRequired,
+        replacementOnly
       });
     }
     return results;
@@ -1500,7 +1591,9 @@
     if (urlOrderId && !orderIds.includes(urlOrderId)) orderIds.unshift(urlOrderId);
     const records = [];
     const detailLinks = extractOrderDetailLinks(doc, url);
-    const returnLinks = extractReturnStatusLinks(doc, url);
+    const statusLinks = extractReturnStatusLinks(doc, url);
+    const replacementLinks = statusLinks.filter(link => link.replacementOnly === true);
+    const returnLinks = statusLinks.filter(link => link.replacementOnly !== true);
     const detailByOrder = new Map(detailLinks.map(link => [link.orderId, link.url]));
 
     for (const orderId of orderIds) {
@@ -1691,6 +1784,7 @@
       records: deduped,
       detailLinks,
       returnLinks,
+      replacementLinks,
       historyPageLinks: extractOrderHistoryLinks(doc, url),
       nextPageUrl: findNextLink(doc, url),
       nextPageCandidates: nextPageCandidates(doc, url),
@@ -1740,6 +1834,9 @@
     extractReturnStatusLinks,
     returnUrlMetadata,
     nearestReturnItemEvidence,
+    replacementEvidenceFromText,
+    nearestReplacementEvidence,
+    replacementStageRank,
     extractOrderHistoryLinks,
     extractHistoryYearLinks,
     historyYearFromUrl,

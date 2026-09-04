@@ -94,3 +94,15 @@ assert(!dashboardSourceV01810.includes('<span>Processing</span>'), 'Processing t
 assert(dashboardSourceV01810.includes('captured order total · fully processed canonical orders'), 'Complete orders metric must combine count meaning and captured-dollar context');
 assert(dashboardSourceV01810.includes('<span>Return review</span>'), 'review stat must use Return review label');
 console.log('v0.18.10 consolidated dashboard metrics regressions passed');
+
+
+const parserV01811 = fs.readFileSync(__dirname + '/parser.js', 'utf8');
+const dashboardV01811 = fs.readFileSync(__dirname + '/dashboard.js', 'utf8');
+const htmlV01811 = fs.readFileSync(__dirname + '/dashboard.html', 'utf8');
+assert(parserV01811.includes("statusLinks.filter(link => link.replacementOnly === true)"), 'replacement-only management links must be separated from true return links');
+assert(parserV01811.includes('replacementNoReturnRequired'), 'parser must retain explicit no-return-required replacement evidence');
+assert(dashboardV01811.includes("stateKey = 'replacement'"), 'replacement-only orders must have replacement status rather than Return detected');
+assert(dashboardV01811.includes("value === 'replacement'"), 'replacement orders must be filterable');
+assert(htmlV01811.includes('<option value="replacement">Replacement</option>'), 'status filter must include Replacement');
+assert(dashboardV01811.includes("item.replacementNoReturnRequired ? 'No return required'"), 'product UI must expose no-return-required replacement evidence');
+console.log('v0.18.11 replacement UI regressions passed');

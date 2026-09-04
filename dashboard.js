@@ -45,6 +45,15 @@
       received: 'Return received', refund_issued: 'Refund issued', refunded: 'Refund issued', credited: 'Credited'
     })[stage] || stage || 'Return detected';
   }
+  function replacementStageRank(stage) {
+    return ({ detected:1, requested:2, ordered:2, shipped:3, delivered:4, complete:5 })[String(stage || '').toLowerCase()] || 0;
+  }
+  function replacementLabel(stage) {
+    return ({
+      detected: 'Replacement', requested: 'Replacement requested', ordered: 'Replacement ordered',
+      shipped: 'Replacement shipped', delivered: 'Replacement delivered', complete: 'Replacement complete'
+    })[String(stage || '').toLowerCase()] || 'Replacement';
+  }
   function milestoneDate(record, key) { return record?.returnMilestones?.[key]?.date || ''; }
   function uniqueStrings(values) {
     const seen = new Set(); const out = [];
@@ -159,6 +168,9 @@
       const manualReconciled = returnRecords.some(r => r.manualState === 'reconciled');
       const ranks = returnRecords.map(r => storage.returnStageRank(r));
       const hasReturn = returnRecords.length > 0;
+      const replacementItems = itemJoin.items.filter(item => Boolean(item.replacementStage));
+      const hasReplacement = replacementItems.length > 0;
+      const replacementStage = replacementItems.map(item => item.replacementStage).filter(Boolean).sort((a,b) => replacementStageRank(a) - replacementStageRank(b))[0] || null;
       const allAmazonCredited = hasReturn && ranks.every(rank => rank >= storage.RETURN_STAGE_RANK.credited);
       const allIssued = hasReturn && ranks.every(rank => rank >= storage.RETURN_STAGE_RANK.refund_issued);
       const bankAmazonConflict = hasReturn && returnRecords.some(r => storage.hasAmazonBankConflict(r));
@@ -195,8 +207,10 @@
       } else if (allAmazonCredited) { stateKey = 'credited'; statusLabel = 'Amazon credited'; }
       else if (allIssued) { stateKey = 'refund_issued'; statusLabel = 'Refund issued'; }
       else if (hasReturn) { stateKey = 'return'; statusLabel = stageLabel(storage.getReturnStage(lowestReturn)); }
+      else if (hasReplacement) { stateKey = 'replacement'; statusLabel = replacementLabel(replacementStage); }
 
       const statusTexts = uniqueStrings(returnRecords.map(r => r.statusText).filter(Boolean));
+      const replacementStatusTexts = uniqueStrings(replacementItems.map(item => item.replacementStatusText || replacementLabel(item.replacementStage)).filter(Boolean));
       const lastScannedAt = [order?.lastScannedAt, ...returnRecords.map(r => r.lastScannedAt)].filter(Boolean).sort().at(-1) || null;
       const itemNames = orderItemNames.length ? orderItemNames : returnedItemNames;
       const asins = uniqueStrings([...(order?.asins || []), ...(order?.orderItems || []).map(item => item?.asin), ...returnRecords.flatMap(r => r.asins || [])]);
@@ -206,14 +220,14 @@
       const parsedOrderDate = orderDate ? new Date(orderDate) : null;
       const sortTime = parsedOrderDate && !Number.isNaN(parsedOrderDate.getTime()) ? parsedOrderDate.getTime() : (lastScannedAt ? new Date(lastScannedAt).getTime() : 0);
       rows.push({
-        orderId, order, returns: returnRecords, allReturns: allReturnRecords, returnGroups, hasReturn, needsReview, terminalCancelled, stateKey, statusLabel,
+        orderId, order, returns: returnRecords, allReturns: allReturnRecords, returnGroups, hasReturn, hasReplacement, replacementStage, needsReview, terminalCancelled, stateKey, statusLabel,
         dataComplete, processingError, processingState: order?.processingState || null, expectedReturnCount, authoritativeCount,
         itemStates: itemJoin.items, unmatchedReturnGroups: itemJoin.unmatchedReturnGroups, returnedProductCount: itemJoin.returnedProductCount,
         itemNames, orderItemNames, returnedItemNames, searchItemNames: uniqueStrings([...orderItemNames, ...returnedItemNames]), asins,
         orderTotal: order?.purchaseAmount ?? null, refundAmount, canonicalRefundTotal, childRefundAmount,
         refundAmountMismatch, itemIdentityConflict, groupAmountConflict, strongUnmatchedReturnIdentity, bankAmazonConflict,
         cardLast4: order?.cardLast4 || returnRecords.find(r => r.cardLast4)?.cardLast4 || null,
-        amazonStatus: statusTexts.length ? statusTexts.join(' · ') : (order?.statusText || order?.status || '—'),
+        amazonStatus: uniqueStrings([...replacementStatusTexts, ...statusTexts]).join(' · ') || (order?.statusText || order?.status || '—'),
         detailComplete: Boolean(order?.detailScanComplete), detailScannedAt: order?.detailScannedAt || null,
         orderDate, orderYear, sortTime,
         lastScannedAt, openUrl: canonicalDetailUrl(orderId, order)
@@ -271,17 +285,22 @@
       const groups = item.returnGroups || [];
       const representatives = groups.map(group => group.representative).filter(Boolean);
       const highest = representatives.slice().sort((a,b) => storage.returnStageRank(b) - storage.returnStageRank(a))[0] || null;
-      const returnLabel = groups.length ? `${groups.length > 1 ? `${groups.length} returns · ` : ''}${stageLabel(storage.getReturnStage(highest))}` : 'Not returned';
+      const returnText = groups.length ? `${groups.length > 1 ? `${groups.length} returns · ` : ''}${stageLabel(storage.getReturnStage(highest))}` : '';
+      const replacementText = item.replacementStage ? replacementLabel(item.replacementStage) : '';
+      const workflowLabel = [replacementText, returnText].filter(Boolean).join(' · ') || 'Not returned';
       const meta = [
         item.quantity != null ? `Qty ${item.quantity}` : '',
         item.itemAmount != null ? money(item.itemAmount) : '',
         item.asin || '',
-        item.fulfillmentStatus || ''
+        item.fulfillmentStatus || '',
+        item.replacementNoReturnRequired ? 'No return required' : ''
       ].filter(Boolean).join(' · ');
-      return `<div class="order-product-row ${groups.length ? 'has-product-return' : ''}">
+      const classes = [groups.length ? 'has-product-return' : '', item.replacementStage ? 'has-product-replacement' : ''].filter(Boolean).join(' ');
+      const stateClass = groups.length ? 'product-returned' : item.replacementStage ? 'product-replacement' : 'product-not-returned';
+      return `<div class="order-product-row ${classes}">
         <div class="order-product-head">
           <div><span class="order-product-index">${index + 1}</span><strong title="${esc(item.itemName)}">${esc(item.itemName)}</strong></div>
-          <span class="product-state ${groups.length ? 'product-returned' : 'product-not-returned'}">${esc(returnLabel)}</span>
+          <span class="product-state ${stateClass}">${esc(workflowLabel)}</span>
         </div>
         ${meta ? `<div class="muted tiny order-product-meta">${esc(meta)}</div>` : ''}
         ${groups.length ? `<div class="product-return-lifecycles">${groups.map((group, returnIndex) => lifecycleMarkup(group, returnIndex + 1, groups.length)).join('')}</div>` : ''}
@@ -313,6 +332,7 @@
     if (!value || value === 'all') return true;
     if (value === 'no_return') return row.dataComplete && !row.hasReturn && !row.terminalCancelled;
     if (value === 'needs_review') return row.needsReview;
+    if (value === 'replacement') return row.hasReplacement;
     if (value === 'cancelled') return row.terminalCancelled;
     const target = { return_started:'started', dropped_off:'shipped', return_received:'received', refund_issued:'refund_issued', refund_credited:'credited' }[value];
     if (!target) return true;

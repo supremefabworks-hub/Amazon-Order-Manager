@@ -138,3 +138,7 @@ Normal ledger views are complete-only: canonical Order Details plus all discover
 
 
 Current UI cleanup baseline: v0.18.10 / Issue #31 consolidates Complete orders + Order details and removes the user-facing Processing tab. Processing remains internal; navigation is Orders, Returns, Return review, Errors.
+
+
+### Replacement workflow rule
+Treat replacement and return as independent product workflows. Only suppress a replacement-management return-status link when product-scoped Amazon evidence explicitly proves no return is required. Otherwise retain normal return eligibility. Replacement-only orders are not refunds and must not display `$0.00` as a refund placeholder.

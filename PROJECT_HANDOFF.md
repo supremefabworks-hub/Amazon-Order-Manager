@@ -446,3 +446,11 @@ Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is expli
 - Processing remains internal/hidden; user-facing views are exactly Orders, Returns, Return review, Errors.
 - No crawler/parser/lifecycle/data-completeness semantics changed.
 - Manifest/package v0.18.10; live acceptance after verified dev release.
+
+
+## v0.18.11 replacement workflow candidate
+- Issue #33 tracks live replacement-vs-return acceptance.
+- Replacement is product fulfillment state, not automatically a refund return.
+- Explicit no-return-required replacement evidence suppresses the replacement-management return-status link from return counting/fetching; ambiguous/return-required replacements remain eligible for normal return processing.
+- Replacement-only orders should show replacement status, Refund `—`, and remain outside Returns/Return review.
+- Use synthetic fixtures only in committed tests; do not commit live order exports or addresses.

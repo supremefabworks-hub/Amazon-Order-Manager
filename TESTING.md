@@ -306,3 +306,11 @@ A user-testable development build may merge only after `npm test` and PR CI pass
 - Confirm there is no separate Order details or Processing stat.
 - Confirm navigation is exactly Orders, Returns, Return review, Errors.
 - Confirm incomplete non-error orders remain hidden while scanner progress still reports queued/in-flight work.
+
+
+## v0.18.11 replacement live acceptance
+1. Allow the development updater to install v0.18.11.
+2. Fresh-scan a known replacement-only order where Amazon explicitly says no return is required.
+3. Verify the order/product shows the actual replacement stage and no return lifecycle. Refund must be `—`, and the order must not appear in Returns or Return review.
+4. Verify the Replacement status filter finds it.
+5. Verify a replacement that does not explicitly waive original-item return remains eligible for return processing rather than being suppressed.
