@@ -440,7 +440,7 @@
       const anyIssued = row.dataComplete && row.hasReturn && row.returns.some(ret => storage.returnStageRank(ret) >= storage.RETURN_STAGE_RANK.refund_issued);
       const financialState = !row.dataComplete ? '' : row.bankAmazonConflict ? '<span class="credit-state credit-pending">Bank/Amazon conflict</span>' : bankConfirmed ? '<span class="credit-state credit-confirmed">Bank confirmed</span>' : anyIssued ? '<span class="credit-state credit-pending">Credit pending</span>' : '';
       const progressMarkup = row.processingError
-        ? `<div class="processing-error"><strong>Order processing error</strong><span>${esc(row.processingError)}</span><small>Use Refresh to retry this order after the underlying Amazon issue is resolved.</small></div>`
+        ? `<div class="processing-error"><strong>Order processing error</strong><span>${esc(row.processingError)}</span><small>Use Reset & Refresh to retry this order after the underlying Amazon issue is resolved.</small></div>`
         : !row.dataComplete
           ? `<div class="processing-state"><strong>${esc(row.processingState === 'retrying' ? 'Retrying order data' : 'Processing order data')}</strong><span>${esc(row.order?.processingLastIssue || `${row.authoritativeCount}/${row.expectedReturnCount} return-status pages complete`)}</span></div>`
           : `${orderProductStatusMarkup(row)}${financialState}`;
