@@ -2,7 +2,7 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.12 candidate for Issue #35.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.13 candidate for Issue #37.** GitHub is the source of truth and chat sessions are disposable.
 
 Current live acceptance trackers:
 
@@ -23,9 +23,9 @@ Use [`NEW_CHAT_PROMPT.md`](NEW_CHAT_PROMPT.md). `SESSION_PROTOCOL.md` defines ma
 ## Resume development
 
 1. Read `AGENTS.md`, `PROJECT_HANDOFF.md`, `README.md`, `TESTING.md`, and `SESSION_PROTOCOL.md`.
-2. Read Issues #7, #23, #25, #29, #31, #33, and #35 and any newer issue that supersedes their scope.
+2. Read Issues #7, #23, #25, #29, #31, #33, #35, and #37 and any newer issue that supersedes their scope.
 3. Inspect root source, `manifest.json`, recent commits, open PRs/issues, and tests before editing.
-4. Root v0.18.12 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
+4. Root v0.18.13 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
 5. Run `npm test` before packaging or merging changes.
 6. Every user-testable development revision must bump both `manifest.json` and `package.json` to the same newer Chrome version.
 7. Keep implementation, regression tests, docs, issue state, and handoff synchronized.
@@ -156,7 +156,7 @@ Card last four is extracted only from payment-method/payment-information evidenc
 
 ### Per-order Refresh and dashboard
 
-Every row uses the same fixed `Details | Credit | Reset | Refresh` action group. `Refresh` uses the stored real Order Details URL, opens an inactive Amazon tab, parses rendered canonical details, follows real same-order return-status links when present, saves fresh state, and closes the temporary tab.
+Every row uses the fixed `Details | Credit | Reset & Refresh` action group. `Reset & Refresh` clears all derived data for that Order ID while preserving only the real captured Order Details route, then rebuilds the order from Amazon; failures remain visible in Errors with the route preserved. `Refresh` uses the stored real Order Details URL, opens an inactive Amazon tab, parses rendered canonical details, follows real same-order return-status links when present, saves fresh state, and closes the temporary tab.
 
 Completed-data views are `All orders`, `Returns`, and `Needs review`; incomplete work is isolated in `Processing` and terminal per-order failures in `Errors`. No order container may scroll horizontally. Needs Review dollars equal the expected-refund sum for return records currently flagged for review.
 
@@ -235,3 +235,8 @@ Amazon replacements are modeled independently from refund returns. Product-scope
 ## v0.18.12 adaptive smart-fast serial pacing
 
 v0.18.12 speeds the default crawler without adding concurrency. Inter-job delay is 75–250 ms, normal bursts are 60–90 jobs with 8–15 second cooldowns, and Amazon throttle cooldown remains 10–20 minutes. Rendered worker pages no longer use a blind 450–900 ms settle delay: after Chrome reports navigation complete, the background worker polls a lightweight content-script readiness probe after 100–150 ms and every 75–125 ms for up to 700 ms. Detail/history/return readiness requires job-specific DOM evidence. A readiness timeout is not accepted as completeness; it falls through to the existing authoritative scan/retry/completeness gates. History lazy-load settling now requires both document height and visible Order-ID fingerprint to remain stable for three samples. The crawler remains one job at a time. Issue #35 tracks live throughput/rate-limit acceptance.
+
+
+## v0.18.13 authoritative Reset & Refresh and dynamic version display
+
+Separate Reset and Refresh controls are replaced by one `Reset & Refresh` recovery action. It preserves only the selected Order ID and captured real Order Details URL, removes all stored product/return/refund/replacement/bank/manual derived state, reopens the order as incomplete, and immediately rebuilds it from canonical Amazon evidence using the existing serial crawler lock. A failed rebuild remains in Errors with the real Details URL so retry remains possible. The dashboard header no longer hard-codes a historical version; it renders `chrome.runtime.getManifest().version_name || version` from the installed build. Issue #37 tracks live acceptance.

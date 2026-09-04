@@ -462,3 +462,11 @@ Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is expli
 - Normal pacing: 75–250 ms between jobs; 60–90 jobs per burst; 8–15 sec normal cooldown. Amazon throttle cooldown stays 10–20 min.
 - Rendered pages use bounded job-specific readiness polling instead of fixed 450–900 ms settle delay. Readiness timeout falls through to authoritative scan; it never counts as completeness.
 - History lazy-load stabilization requires both scroll height and Order-ID fingerprint stable for three samples.
+
+
+## v0.18.13 combined recovery candidate
+- Issue #37 tracks live acceptance.
+- Row actions are `Details | Credit | Reset & Refresh`; old standalone Reset/Refresh paths are removed.
+- Reset & Refresh preserves only Order ID + real captured Order Details URL, deletes order-scoped derived ledger state, and rebuilds under the same single-job lock.
+- Failed rebuilds keep a minimal Errors-view shell and never invent a URL.
+- Dashboard version is derived dynamically from the installed manifest; no hard-coded release number belongs in dashboard HTML.

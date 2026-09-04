@@ -135,3 +135,16 @@ assert(backgroundSourceV0189.includes('patchOrderProcessing'), 'background must 
 assert(backgroundSourceV0189.includes("processingState: 'error'"), 'terminal detail failures must enter the Errors view state');
 assert(backgroundSourceV0189.includes("processingState: 'retrying'"), 'transient detail failures must remain Processing while retrying');
 console.log('v0.18.9 completion/error background regressions passed');
+
+
+const backgroundSourceV01813 = fs.readFileSync(__dirname + '/background.js', 'utf8');
+assert(backgroundSourceV01813.includes('async function resetOrderForAuthoritativeRefresh(orderId)'), 'combined recovery must clear order-scoped derived data first');
+assert(backgroundSourceV01813.includes("ledger.filter(record => record?.orderId !== id)"), 'reset must remove every stored record for the selected order ID');
+assert(backgroundSourceV01813.includes("statusText: 'Reset for authoritative refresh'") && backgroundSourceV01813.includes("processingState: 'processing'"), 'reset must leave a minimal processing shell with the real route');
+assert(backgroundSourceV01813.includes('previousCrawlCompletion') && backgroundSourceV01813.includes('restoreCrawlCompletionAfterAuthoritativeRefresh'), 'crawl completion must be removed during rebuild and restored only after success');
+assert(backgroundSourceV01813.includes("message.type === 'ARL_RESET_REFRESH_ORDER'"), 'background must expose one combined reset-refresh message');
+assert(!backgroundSourceV01813.includes("message.type === 'ARL_REFRESH_ORDER'"), 'old standalone refresh message path must be removed');
+assert(backgroundSourceV01813.includes('while (processing && Date.now() < waitDeadline)') && backgroundSourceV01813.includes('processing = true'), 'manual rebuild must share the serial crawler lock');
+assert(backgroundSourceV01813.includes("processingError: `reset-refresh:"), 'failed rebuild must retain an Errors-view shell');
+assert(backgroundSourceV01813.includes('await chrome.tabs.remove(tabId)'), 'Reset & Refresh must close its temporary inactive Amazon tab before releasing the lock');
+console.log('v0.18.13 reset-refresh background regressions passed');
