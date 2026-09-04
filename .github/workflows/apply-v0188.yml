@@ -21,6 +21,18 @@ jobs:
           node-version: 20
       - name: Apply v0.18.8 fixes
         run: python3 tools/apply_v0188.py
+      - name: Update bank verification regression contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('storage-test.js')
+          s = p.read_text(encoding='utf-8')
+          old = "  assert(s.returnProgress(bankConfirmed).credited === true, 'return progress should finish after bank confirmation');"
+          new = "  assert(s.returnProgress(bankConfirmed).financialCreditConfirmed === true, 'bank confirmation should complete financial verification');\n  assert(s.returnProgress(bankConfirmed).credited === false, 'bank confirmation alone must not mark Amazon Refund credited complete');"
+          if s.count(old) != 1:
+              raise SystemExit(f'expected old bank-progress assertion once, got {s.count(old)}')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Validate generated source
         run: |
           node --check parser.js
