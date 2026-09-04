@@ -398,3 +398,8 @@ The historical exact v0.16.0 package remains archived under `source-snapshots/v0
 `0ac308d98a4acf47fff51f5fd63410a9e9dc8e6105e7d6f17dcebd9b6e71ac42`
 
 It is recovery/audit material only. Do not replace the complete v0.18 root with v0.16 unless current root is proven corrupt and rollback is intentional.
+
+
+## v0.18.4 terminal cancelled-order handling
+
+Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is explicitly Cancelled, totals `$0.00`, and has no real Order Details link. v0.18.4 treats only that strongly proven terminal history-card shape as complete for the crawl gate without setting `detailScanComplete`. Normal missing-detail orders still stop. Issue #19 is the live tracker. The second PC should test unattended `0.18.3 -> 0.18.4` update; do not reinstall or manually Reload for that proof.

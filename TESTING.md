@@ -248,3 +248,13 @@ A user-testable development build may merge only after `npm test` and PR CI pass
 - A bare static `Refund issued` timeline label must not make the order/return status say Refund issued; affirmative Amazon issuance prose must still do so.
 - Long review/status badges must wrap without overlapping the Order ID.
 - Leave v0.18.2 installed and do not manually reload/replace it after `dev-v0.18.3` publishes; confirm Chrome advances to v0.18.3 through the native updater.
+
+
+## v0.18.4 terminal cancelled order
+
+1. Start from a clean v0.18.4 development ledger and run the lifetime scan.
+2. On 2026 page 6, order `112-3886192-2097013` must be accepted from its own history card only when it shows the same Order ID, exact Cancelled/Canceled state, and `$0.00` Total with no Detail URL.
+3. The row must show `Cancelled`, `$0.00`, `Terminal history`; `Detailed` must not appear and Details/Refresh must be disabled.
+4. The crawler must continue to the next page/year instead of stopping on that order.
+5. A synthetic/nonzero/ambiguous cancellation fixture without a Detail URL must still stop with the exact missing Order ID.
+6. For updater acceptance on the second PC, start at v0.18.3 and do not reinstall/reload; confirm `current\manifest.json` and Chrome both move to 0.18.4 automatically.

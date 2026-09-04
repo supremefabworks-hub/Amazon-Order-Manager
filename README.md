@@ -2,7 +2,7 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.3 candidate for Issue #17.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.4 candidate for Issue #19.** GitHub is the source of truth and chat sessions are disposable.
 
 Two issues remain intentionally separate:
 
@@ -18,7 +18,7 @@ Use [`NEW_CHAT_PROMPT.md`](NEW_CHAT_PROMPT.md). `SESSION_PROTOCOL.md` defines ma
 1. Read `AGENTS.md`, `PROJECT_HANDOFF.md`, `README.md`, `TESTING.md`, and `SESSION_PROTOCOL.md`.
 2. Read Issues #7 and #10 and any newer issue that supersedes either scope.
 3. Inspect root source, `manifest.json`, recent commits, open PRs/issues, and tests before editing.
-4. Root v0.18.2 is the active source after PR #16 merges. The archived v0.16.0 ZIP is recovery material only.
+4. Root v0.18.4 is the active candidate for the terminal-cancelled-order live fix. The archived v0.16.0 ZIP is recovery material only.
 5. Run `npm test` before packaging or merging changes.
 6. Every user-testable development revision must bump both `manifest.json` and `package.json` to the same newer Chrome version.
 7. Keep implementation, regression tests, docs, issue state, and handoff synchronized.
@@ -180,3 +180,10 @@ The exact pre-GitHub v0.16.0 ZIP remains under `source-snapshots/v0.16.0/full/` 
 Documented SHA-256:
 
 `0ac308d98a4acf47fff51f5fd63410a9e9dc8e6105e7d6f17dcebd9b6e71ac42`
+
+
+## v0.18.4 terminal cancelled-order handling
+
+Amazon can render a fully cancelled `$0.00` order in Order History without any `View order details` URL. v0.18.4 adds a narrow terminal-history exception: only a scoped history card proving the same Order ID, an exact `Cancelled`/`Canceled` state, an exact `$0.00` total, and no real Order Details link may satisfy the managed crawl page gate. It is saved with `historyTerminalComplete=true` / `historyTerminalState=cancelled`, remains `detailScanComplete=false`, counts toward lifetime unique-order completion, and renders as `Cancelled` / `Terminal history` with Details and Refresh disabled. Any normal, ambiguous, nonzero, or unknown-total missing-link order still hard-stops the crawler rather than inventing a URL.
+
+Issue #19 tracks live acceptance using order `112-3886192-2097013` as the observed case. This release is also intended as the automatic updater test from a fresh v0.18.3 installation on the second Windows PC.

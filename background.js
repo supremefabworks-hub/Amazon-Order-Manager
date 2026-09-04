@@ -395,6 +395,24 @@ function uniqueDetailLinks(result) {
   return Array.from(byId.values());
 }
 
+function terminalCancelledHistoryOrders(result) {
+  const out = new Map();
+  const pageUrl = String(result?.scannedUrl || '');
+  if (!isOrderHistoryUrl(pageUrl)) return out;
+  for (const record of result?.records || []) {
+    const orderId = String(record?.orderId || '').trim();
+    const sourceUrl = String(record?.sourceUrl || pageUrl);
+    const exactCancelled = /^(?:cancelled|canceled)$/i.test(String(record?.statusText || '').trim());
+    const zeroTotal = record?.purchaseAmount !== null && record?.purchaseAmount !== undefined && record?.purchaseAmount !== '' && Number(record.purchaseAmount) === 0;
+    if (!/^\d{3}-\d{7}-\d{7}$/.test(orderId)) continue;
+    if (!isOrderHistoryUrl(sourceUrl)) continue;
+    if (record?.recordType !== 'order' || record?.historyTerminalComplete !== true || record?.historyTerminalState !== 'cancelled') continue;
+    if (!exactCancelled || !zeroTotal || record?.orderDetailsUrl) continue;
+    out.set(orderId, record);
+  }
+  return out;
+}
+
 async function queueManagedHistoryResult(result, job) {
   const state = ensureCrawl(await getState());
   const crawl = state.crawl;
@@ -412,12 +430,13 @@ async function queueManagedHistoryResult(result, job) {
   crawl.phase = 'details';
 
   const links = uniqueDetailLinks(result);
+  const terminalByOrder = terminalCancelledHistoryOrders(result);
   const pageOrderIds = historyOrderIdSet(result);
   if (!pageOrderIds.length) throw new Error(`No visible Amazon Order IDs were found on ${year} page ${page}`);
   const linkByOrder = new Map(links.map(link => [link.orderId, link]));
-  const missingDetailUrls = pageOrderIds.filter(orderId => !linkByOrder.has(orderId));
+  const missingDetailUrls = pageOrderIds.filter(orderId => !linkByOrder.has(orderId) && !terminalByOrder.has(orderId));
   if (missingDetailUrls.length) throw new Error(`Missing real View order details URL for ${missingDetailUrls.length} order(s) on ${year} page ${page}: ${missingDetailUrls.join(', ')}. The crawler stopped rather than inventing canonical URLs.`);
-  const orderedLinks = pageOrderIds.map(orderId => linkByOrder.get(orderId));
+  const orderedLinks = pageOrderIds.map(orderId => linkByOrder.get(orderId)).filter(Boolean);
   crawl.currentPageOrderIds = pageOrderIds;
   crawl.currentPageCompleted = 0;
   const pageKey = `${year}:${page}`;
@@ -435,6 +454,15 @@ async function queueManagedHistoryResult(result, job) {
     }
     crawl.seenPages[pageKey] = fingerprint;
   }
+
+  for (const orderId of pageOrderIds) {
+    if (!terminalByOrder.has(orderId) || crawl.completedOrders[orderId]) continue;
+    crawl.completedOrders[orderId] = { at: nowIso(), year, page, terminalState: 'cancelled', source: 'order-history-card' };
+    crawl.ordersCompleted = (crawl.ordersCompleted || 0) + 1;
+    crawl.lastCompletedOrderId = orderId;
+    crawl.lastCompletedAt = nowIso();
+  }
+  crawl.currentPageCompleted = pageOrderIds.filter(orderId => crawl.completedOrders[orderId]).length;
 
   const existingKeys = new Set(state.queue.map(jobKey));
   if (state.currentJob) existingKeys.add(jobKey(state.currentJob));
@@ -1014,7 +1042,7 @@ async function runJob(job) {
     let current = await scanWorkerTab(tabId, { type: 'history', url: historyUrl, crawlManaged: true, historyYear: job.crawlYear, historyPage: job.crawlPage });
     await broadcastLedgerUpdate(current.save);
 
-    // Page is complete only after every order on it has a Detail page capture.
+    // Page is complete only after every order has either a Detail capture or proven terminal cancellation.
     const stateBeforeAdvance = ensureCrawl(await getState());
     stateBeforeAdvance.crawl.pagesCompleted = (stateBeforeAdvance.crawl.pagesCompleted || 0) + 1;
     stateBeforeAdvance.crawl.phase = 'advance';
@@ -1105,8 +1133,8 @@ async function runJob(job) {
   }
 
   if (job.type === 'history' && job.crawlManaged) {
-    const links = uniqueDetailLinks(result);
-    if (!links.length) throw new Error(`No orders were found on ${job.historyYear || ''} page ${job.historyPage || ''}`.trim());
+    const pageOrderIds = historyOrderIdSet(result);
+    if (!pageOrderIds.length) throw new Error(`No orders were found on ${job.historyYear || ''} page ${job.historyPage || ''}`.trim());
     await queueManagedHistoryResult(result, job);
     await broadcastLedgerUpdate(result.save);
     return result;

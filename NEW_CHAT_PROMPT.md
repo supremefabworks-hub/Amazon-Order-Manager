@@ -113,3 +113,7 @@ Do not leave important project state only in this chat. The repository must rema
 Start by reporting the current baseline/version, active issues/goals, whether root source is complete, the current development release status, and the exact plan. Then proceed with the work rather than asking me to restate prior context.
 
 ---
+
+
+### v0.18.4 terminal cancelled-order handling
+Treat a scoped Order History card as terminal-complete without a Detail URL only when it proves the same Order ID, exact Cancelled/Canceled status, exact `$0.00` Total, and no real Detail link. Persist `historyTerminalComplete=true` / `historyTerminalState=cancelled`; never set `detailScanComplete` for this path. All other visible orders still require real captured Order Details URLs. Issue #19 tracks live acceptance.

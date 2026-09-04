@@ -52,6 +52,28 @@
     return null;
   }
 
+  function findHistoryCardTotal(text) {
+    const normalized = normalizeText(text);
+    const match = normalized.match(/(?:^|\n)\s*Total\s*(?:\n\s*)?\$\s*([0-9,]+(?:\.\d{2})?)\s*(?:$|\n)/im);
+    if (!match) return null;
+    const value = Number(match[1].replace(/,/g, ''));
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function terminalCancelledHistoryEvidence(text, orderId) {
+    const normalized = normalizeText(text);
+    const ids = extractOrderIds(normalized);
+    const exactOrder = ids.length === 1 && ids[0] === String(orderId || '');
+    const cancelled = /(?:^|\n)\s*cancel(?:led|ed)\s*(?:$|\n)/im.test(normalized);
+    const total = findHistoryCardTotal(normalized);
+    return {
+      complete: Boolean(exactOrder && cancelled && total === 0),
+      cancelled,
+      exactOrder,
+      total
+    };
+  }
+
   function findOrderRefundTotal(text) {
     // Canonical order-level refund money comes only from a standalone Amazon Order Details
     // "Refund Total" label. Generic refund lifecycle prose must never become this field.
@@ -1119,6 +1141,7 @@
     const returnMeta = returnUrlMetadata(url);
     const returnToken = returnMeta.returnToken;
     const detailPage = isOrderDetailPage(url);
+    const historyPage = isOrderHistoryPage(doc, url);
     const extractedOrderIds = extractOrderIds(bodyText);
     const urlOrderId = orderIdFromUrl(url);
     // On Order Details and Return Center pages, the order ID in Amazon's URL is authoritative.
@@ -1134,7 +1157,7 @@
     const detailByOrder = new Map(detailLinks.map(link => [link.orderId, link.url]));
 
     for (const orderId of orderIds) {
-      let container = isOrderHistoryPage(doc, url) ? historyContainerForOrder(doc, orderId) : closestContainerForOrder(doc, orderId);
+      let container = historyPage ? historyContainerForOrder(doc, orderId) : closestContainerForOrder(doc, orderId);
       if ((detailPage || pageType === 'return') && orderIds.length === 1) container = doc?.body || container;
       const containerText = container ? normalizeText(container.innerText || container.textContent || '') : contextAround(bodyText, orderId);
       const context = (detailPage || pageType === 'return') && orderIds.length === 1 ? bodyText : (containerText.length >= 80 ? containerText : contextAround(bodyText, orderId));
@@ -1158,6 +1181,17 @@
       const asins = extractAsins(container);
       if (domNames.length && !(pageType === 'return' && record.itemNames?.length)) record.itemNames = domNames;
       record.asins = asins;
+
+      if (historyPage && record.recordType === 'order' && !detailByOrder.get(orderId)) {
+        const terminal = terminalCancelledHistoryEvidence(context, orderId);
+        if (record.purchaseAmount == null && terminal.total != null) record.purchaseAmount = terminal.total;
+        if (terminal.complete) {
+          record.historyTerminalComplete = true;
+          record.historyTerminalState = 'cancelled';
+          record.historyTerminalSource = 'order-history-card';
+          record.statusText = 'Cancelled';
+        }
+      }
 
       if (detailPage && record.recordType === 'order') {
         record.detailScanComplete = isCompleteCanonicalDetail(record, url);
@@ -1321,6 +1355,8 @@
     parseMoney,
     findLabeledMoney,
     findOrderTotal,
+    findHistoryCardTotal,
+    terminalCancelledHistoryEvidence,
     findRefundAmount,
     findOrderRefundTotal,
     findCardLast4,
