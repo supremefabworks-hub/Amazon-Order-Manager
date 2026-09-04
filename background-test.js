@@ -117,3 +117,11 @@ assert(backgroundSourceV0187.includes('const JOB_DELAY_MIN_MS = 175;') && backgr
 assert(backgroundSourceV0187.includes('const LOAD_SETTLE_MIN_MS = 450;') && backgroundSourceV0187.includes('const LOAD_SETTLE_MAX_MS = 900;'), 'v0.18.7 page settle pacing should be about 30% faster');
 assert(backgroundSourceV0187.includes('RATE_LIMIT_COOLDOWN_MIN_MS = 10 * 60 * 1000') && backgroundSourceV0187.includes('RATE_LIMIT_COOLDOWN_MAX_MS = 20 * 60 * 1000'), 'rate-limit cooldown safety must remain unchanged');
 console.log('v0.18.7 pacing regression passed');
+
+
+const backgroundSourceV0189 = fs.readFileSync(__dirname + '/background.js', 'utf8');
+assert(backgroundSourceV0189.includes("r?.orderDataComplete === true"), 'page completion must require fully processed order data');
+assert(backgroundSourceV0189.includes('patchOrderProcessing'), 'background must persist order processing/error state');
+assert(backgroundSourceV0189.includes("processingState: 'error'"), 'terminal detail failures must enter the Errors view state');
+assert(backgroundSourceV0189.includes("processingState: 'retrying'"), 'transient detail failures must remain Processing while retrying');
+console.log('v0.18.9 completion/error background regressions passed');

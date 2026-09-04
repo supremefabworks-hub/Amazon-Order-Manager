@@ -131,3 +131,7 @@ Return milestone completion is evidence-safe: static timeline labels, future ins
 
 ### v0.18.8 durable addition
 Amazon return lifecycle and bank credit verification are independent. Render five Amazon stages including Return received. Future/static labels do not complete stages; milestone checkmarks are leading-stage evidence. Bank evidence never promotes Amazon stage; bank-before-refund-issued is a review conflict. Issue #27 tracks acceptance.
+
+
+### v0.18.9 durable addition
+Normal ledger views are complete-only: canonical Order Details plus all discovered return-status children must finish before an order appears. Processing and Errors isolate partial/failed orders. Detached return HTML checkmark count is never completion evidence; checkmarks must be structurally bound/non-hidden and cannot outrank affirmative Amazon lifecycle prose. Completed return displays prefer authoritative return captures. Dashboard supports search plus status/year/card filtering and sort controls. Issue #29 tracks live acceptance.

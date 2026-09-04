@@ -7,17 +7,23 @@
   const stats = document.getElementById('stats');
   const empty = document.getElementById('empty');
   const search = document.getElementById('search');
+  const statusFilter = document.getElementById('statusFilter');
+  const yearFilter = document.getElementById('yearFilter');
+  const cardFilter = document.getElementById('cardFilter');
+  const sortOrder = document.getElementById('sortOrder');
   const scannerStatus = document.getElementById('scannerStatus');
   const scannerCheckpoint = document.getElementById('scannerCheckpoint');
   const navAllCount = document.getElementById('navAllCount');
   const navReturnCount = document.getElementById('navReturnCount');
   const navReviewCount = document.getElementById('navReviewCount');
+  const navProcessingCount = document.getElementById('navProcessingCount');
+  const navErrorCount = document.getElementById('navErrorCount');
   const bankBridgeStatus = document.getElementById('bankBridgeStatus');
   const bankResultFile = document.getElementById('bankResultFile');
   let ledger = [];
   let settings = storage.DEFAULT_SETTINGS;
   let currentView = new URLSearchParams(location.search).get('view') || 'all';
-  if (!['all', 'returns', 'needs_review'].includes(currentView)) currentView = 'all';
+  if (!['all', 'returns', 'needs_review', 'processing', 'errors'].includes(currentView)) currentView = 'all';
 
   function esc(value) {
     return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
@@ -140,14 +146,20 @@
     const rows = [];
     for (const orderId of ids) {
       const order = orders.get(orderId) || null;
-      const returnRecords = dedupeReturns(returns.get(orderId) || []);
+      const allReturnRecords = dedupeReturns(returns.get(orderId) || []);
+      const terminalCancelled = Boolean(order?.historyTerminalComplete === true && order?.historyTerminalState === 'cancelled');
+      const expectedReturnCount = Number.isFinite(Number(order?.returnStatusExpectedCount)) ? Number(order.returnStatusExpectedCount) : 0;
+      const authoritativeCount = Number.isFinite(Number(order?.returnStatusAuthoritativeCount)) ? Number(order.returnStatusAuthoritativeCount) : 0;
+      const dataComplete = terminalCancelled || Boolean(order?.orderDataComplete === true && authoritativeCount >= expectedReturnCount);
+      const processingError = String(order?.processingError || '').trim() || null;
+      const authoritativeReturns = allReturnRecords.filter(record => record?.authoritativeReturnCapture === true);
+      const returnRecords = dataComplete && expectedReturnCount > 0 ? authoritativeReturns : allReturnRecords;
       const returnGroups = groupReturnRecords(returnRecords);
       const itemJoin = itemModel?.joinOrderItems(order, returnGroups) || { items: [], unmatchedReturnGroups: returnGroups.map(group => ({ group, identityStrength: 'weak', bestScore: 0 })), returnedProductCount: 0 };
       const strongUnmatchedReturnIdentity = itemJoin.unmatchedReturnGroups.some(entry => entry.identityStrength === 'strong');
       const manualReconciled = returnRecords.some(r => r.manualState === 'reconciled');
       const ranks = returnRecords.map(r => storage.returnStageRank(r));
       const hasReturn = returnRecords.length > 0;
-      const terminalCancelled = Boolean(order?.historyTerminalComplete === true && order?.historyTerminalState === 'cancelled');
       const allAmazonCredited = hasReturn && ranks.every(rank => rank >= storage.RETURN_STAGE_RANK.credited);
       const allIssued = hasReturn && ranks.every(rank => rank >= storage.RETURN_STAGE_RANK.refund_issued);
       const bankAmazonConflict = hasReturn && returnRecords.some(r => storage.hasAmazonBankConflict(r));
@@ -158,20 +170,20 @@
       const returnedItemNames = uniqueStrings(returnGroups.flatMap(group => group.itemNames || []));
       const childRefundAmount = returnGroups.reduce((total, group) => total + (Number.isFinite(Number(group.amount)) ? Number(group.amount) : 0), 0);
       const canonicalRefundCandidate = order?.canonicalRefundTotal;
-      const canonicalRefundTotal = canonicalRefundCandidate !== null && canonicalRefundCandidate !== undefined && canonicalRefundCandidate !== '' && Number.isFinite(Number(canonicalRefundCandidate))
-        ? Number(canonicalRefundCandidate)
-        : null;
+      const canonicalRefundTotal = canonicalRefundCandidate !== null && canonicalRefundCandidate !== undefined && canonicalRefundCandidate !== '' && Number.isFinite(Number(canonicalRefundCandidate)) ? Number(canonicalRefundCandidate) : null;
       const refundAmount = canonicalRefundTotal != null ? canonicalRefundTotal : (returnGroups.some(g => Number.isFinite(Number(g.amount))) ? childRefundAmount : null);
       const refundAmountMismatch = canonicalRefundTotal != null && childRefundAmount > canonicalRefundTotal + 0.011;
       const itemIdentityConflict = returnGroups.some(group => group.itemIdentityConflict);
       const groupAmountConflict = returnGroups.some(group => group.amountConflict);
-      const needsReview = hasReturn && !manualReconciled && (
+      const needsReview = dataComplete && hasReturn && !manualReconciled && (
         returnRecords.some(r => storage.needsCreditReview(r)) || refundAmountMismatch || itemIdentityConflict || groupAmountConflict || strongUnmatchedReturnIdentity || bankAmazonConflict
       );
 
+      const lowestReturn = returnRecords.slice().sort((a,b) => storage.returnStageRank(a) - storage.returnStageRank(b))[0] || null;
       let stateKey = 'purchase';
       let statusLabel = order?.statusText || (order?.detailScanComplete ? 'Order details captured' : 'Order discovered');
-      if (terminalCancelled && !hasReturn) { stateKey = 'cancelled'; statusLabel = 'Cancelled'; }
+      if (!dataComplete) { stateKey = processingError ? 'error' : 'processing'; statusLabel = processingError ? 'Processing error' : (order?.processingState === 'retrying' ? 'Retrying' : 'Processing'); }
+      else if (terminalCancelled && !hasReturn) { stateKey = 'cancelled'; statusLabel = 'Cancelled'; }
       else if (manualReconciled) { stateKey = 'reconciled'; statusLabel = 'Reconciled'; }
       else if (needsReview) {
         stateKey = 'needs_review';
@@ -180,34 +192,35 @@
         else if (groupAmountConflict) statusLabel = 'Return refund needs review';
         else if (strongUnmatchedReturnIdentity) statusLabel = 'Returned item needs matching';
         else if (bankAmazonConflict) statusLabel = 'Bank/Amazon status conflict';
-        else {
-          const lowest = returnRecords.slice().sort((a,b) => storage.returnStageRank(a)-storage.returnStageRank(b))[0];
-          statusLabel = stageLabel(storage.getReturnStage(lowest));
-        }
+        else statusLabel = stageLabel(storage.getReturnStage(lowestReturn));
       } else if (allAmazonCredited) { stateKey = 'credited'; statusLabel = 'Amazon credited'; }
       else if (allIssued) { stateKey = 'refund_issued'; statusLabel = 'Refund issued'; }
-      else if (hasReturn) { stateKey = 'return'; statusLabel = stageLabel(storage.getReturnStage(returnRecords[0])); }
+      else if (hasReturn) { stateKey = 'return'; statusLabel = stageLabel(storage.getReturnStage(lowestReturn)); }
 
       const statusTexts = uniqueStrings(returnRecords.map(r => r.statusText).filter(Boolean));
       const lastScannedAt = [order?.lastScannedAt, ...returnRecords.map(r => r.lastScannedAt)].filter(Boolean).sort().at(-1) || null;
       const itemNames = orderItemNames.length ? orderItemNames : returnedItemNames;
+      const asins = uniqueStrings([...(order?.asins || []), ...(order?.orderItems || []).map(item => item?.asin), ...returnRecords.flatMap(r => r.asins || [])]);
+      const orderDate = order?.orderDate || null;
+      const orderYearMatch = String(orderDate || '').match(/\b(20\d{2})\b/);
+      const orderYear = orderYearMatch ? orderYearMatch[1] : null;
+      const parsedOrderDate = orderDate ? new Date(orderDate) : null;
+      const sortTime = parsedOrderDate && !Number.isNaN(parsedOrderDate.getTime()) ? parsedOrderDate.getTime() : (lastScannedAt ? new Date(lastScannedAt).getTime() : 0);
       rows.push({
-        orderId, order, returns: returnRecords, returnGroups, hasReturn, needsReview, terminalCancelled, stateKey, statusLabel,
+        orderId, order, returns: returnRecords, allReturns: allReturnRecords, returnGroups, hasReturn, needsReview, terminalCancelled, stateKey, statusLabel,
+        dataComplete, processingError, processingState: order?.processingState || null, expectedReturnCount, authoritativeCount,
         itemStates: itemJoin.items, unmatchedReturnGroups: itemJoin.unmatchedReturnGroups, returnedProductCount: itemJoin.returnedProductCount,
-        itemNames, orderItemNames, returnedItemNames, searchItemNames: uniqueStrings([...orderItemNames, ...returnedItemNames]),
+        itemNames, orderItemNames, returnedItemNames, searchItemNames: uniqueStrings([...orderItemNames, ...returnedItemNames]), asins,
         orderTotal: order?.purchaseAmount ?? null, refundAmount, canonicalRefundTotal, childRefundAmount,
         refundAmountMismatch, itemIdentityConflict, groupAmountConflict, strongUnmatchedReturnIdentity, bankAmazonConflict,
         cardLast4: order?.cardLast4 || returnRecords.find(r => r.cardLast4)?.cardLast4 || null,
         amazonStatus: statusTexts.length ? statusTexts.join(' · ') : (order?.statusText || order?.status || '—'),
         detailComplete: Boolean(order?.detailScanComplete), detailScannedAt: order?.detailScannedAt || null,
+        orderDate, orderYear, sortTime,
         lastScannedAt, openUrl: canonicalDetailUrl(orderId, order)
       });
     }
-    return rows.sort((a,b) => {
-      if (a.needsReview !== b.needsReview) return a.needsReview ? -1 : 1;
-      if (a.hasReturn !== b.hasReturn) return a.hasReturn ? -1 : 1;
-      return String(b.lastScannedAt || '').localeCompare(String(a.lastScannedAt || ''));
-    });
+    return rows;
   }
 
   function lifecycleMarkup(group, index, totalGroups) {
@@ -283,17 +296,68 @@
     return `<div class="order-product-stack">${products}${unmatched}</div>`;
   }
 
+  function setDynamicOptions(select, values, allLabel) {
+    if (!select) return;
+    const prior = select.value || 'all';
+    select.innerHTML = `<option value="all">${esc(allLabel)}</option>` + values.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('');
+    select.value = values.includes(prior) || prior === 'all' ? prior : 'all';
+  }
+
+  function refreshDynamicFilters(rows) {
+    const years = uniqueStrings(rows.map(row => row.orderYear).filter(Boolean)).sort((a,b) => Number(b)-Number(a));
+    const cards = uniqueStrings(rows.map(row => row.cardLast4).filter(Boolean)).sort().map(value => `•••• ${value}`);
+    setDynamicOptions(yearFilter, years, 'All years');
+    setDynamicOptions(cardFilter, cards, 'All cards');
+  }
+
+  function rowMatchesStatus(row, value) {
+    if (!value || value === 'all') return true;
+    if (value === 'no_return') return row.dataComplete && !row.hasReturn && !row.terminalCancelled;
+    if (value === 'needs_review') return row.needsReview;
+    if (value === 'cancelled') return row.terminalCancelled;
+    const target = { return_started:'started', dropped_off:'shipped', return_received:'received', refund_issued:'refund_issued', refund_credited:'credited' }[value];
+    if (!target) return true;
+    return (row.returns || []).some(record => storage.getReturnStage(record) === target);
+  }
+
+  function sortRows(rows) {
+    const mode = sortOrder?.value || 'newest';
+    const numeric = (row, field) => Number.isFinite(Number(row[field])) ? Number(row[field]) : -Infinity;
+    return rows.slice().sort((a,b) => {
+      if (mode === 'oldest') return (a.sortTime || 0) - (b.sortTime || 0);
+      if (mode === 'order_high') return numeric(b,'orderTotal') - numeric(a,'orderTotal');
+      if (mode === 'order_low') return numeric(a,'orderTotal') - numeric(b,'orderTotal');
+      if (mode === 'refund_high') return numeric(b,'refundAmount') - numeric(a,'refundAmount');
+      if (mode === 'refund_low') return numeric(a,'refundAmount') - numeric(b,'refundAmount');
+      if (mode === 'status') return String(a.statusLabel || '').localeCompare(String(b.statusLabel || '')) || String(a.orderId).localeCompare(String(b.orderId));
+      if (mode === 'order_id') return String(a.orderId).localeCompare(String(b.orderId));
+      return (b.sortTime || 0) - (a.sortTime || 0);
+    });
+  }
+
   function filteredRows() {
+    const allRows = buildRows();
+    refreshDynamicFilters(allRows);
     const q = search.value.trim().toLowerCase();
-    return buildRows().filter(row => {
-      if (currentView === 'returns' && !row.hasReturn) return false;
-      if (currentView === 'needs_review' && !row.needsReview) return false;
+    const selectedCard = String(cardFilter?.value || 'all').replace(/\D/g,'').slice(-4);
+    const selectedYear = yearFilter?.value || 'all';
+    const selectedStatus = statusFilter?.value || 'all';
+    const rows = allRows.filter(row => {
+      if (currentView === 'all' && !row.dataComplete) return false;
+      if (currentView === 'returns' && (!row.dataComplete || !row.hasReturn)) return false;
+      if (currentView === 'needs_review' && (!row.dataComplete || !row.needsReview)) return false;
+      if (currentView === 'processing' && (row.dataComplete || row.processingError)) return false;
+      if (currentView === 'errors' && !row.processingError) return false;
+      if (selectedYear !== 'all' && row.orderYear !== selectedYear) return false;
+      if (cardFilter?.value !== 'all' && String(row.cardLast4 || '') !== selectedCard) return false;
+      if (!rowMatchesStatus(row, selectedStatus)) return false;
       if (q) {
-        const hay = [row.orderId, ...(row.searchItemNames || row.itemNames), row.cardLast4, row.statusLabel, row.amazonStatus, row.orderTotal, row.refundAmount].join(' ').toLowerCase();
+        const hay = [row.orderId, ...(row.searchItemNames || row.itemNames), ...(row.asins || []), row.cardLast4, row.statusLabel, row.amazonStatus, row.processingError, row.orderTotal, row.refundAmount].join(' ').toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
+    return sortRows(rows);
   }
 
   function sum(rows, field) { return rows.reduce((total,row) => total + (Number.isFinite(Number(row[field])) ? Number(row[field]) : 0), 0); }
@@ -310,7 +374,10 @@
   }
 
   function renderStats() {
-    const rows = buildRows();
+    const allRows = buildRows();
+    const rows = allRows.filter(r => r.dataComplete);
+    const processingRows = allRows.filter(r => !r.dataComplete && !r.processingError);
+    const errorRows = allRows.filter(r => Boolean(r.processingError));
     const returnRows = rows.filter(r => r.hasReturn);
     const reviewRows = rows.filter(r => r.needsReview);
     const detailed = rows.filter(r => r.detailComplete);
@@ -320,13 +387,15 @@
     navAllCount.textContent = String(rows.length);
     navReturnCount.textContent = String(returnRows.length);
     navReviewCount.textContent = String(reviewRows.length);
+    navProcessingCount.textContent = String(processingRows.length);
+    navErrorCount.textContent = String(errorRows.length);
     stats.innerHTML = `
-      <div class="stat"><span>All orders</span><strong>${rows.length}</strong><small>${money(sum(rows, 'orderTotal'))} captured order total</small></div>
-      <div class="stat"><span>Order details</span><strong>${detailed.length}</strong><small>View order details parsed</small></div>
+      <div class="stat"><span>Complete orders</span><strong>${rows.length}</strong><small>${money(sum(rows, 'orderTotal'))} captured order total</small></div>
+      <div class="stat"><span>Order details</span><strong>${detailed.length}</strong><small>Fully processed canonical orders</small></div>
       <div class="stat"><span>Returns</span><strong>${returnRows.length}</strong><small>${money(sum(returnRows, 'refundAmount'))} expected refunds</small></div>
       <div class="stat stat-review-total"><span>Needs review</span><strong>${money(reviewExpectedTotal)}</strong><small>${reviewRows.length} flagged ${reviewRows.length === 1 ? 'order' : 'orders'}</small></div>
-      <div class="stat"><span>Refund issued</span><strong>${issued.length}</strong><small>Amazon says refund issued</small></div>
-      <div class="stat"><span>Bank credited</span><strong>${bankCredited.length}</strong><small>Bank evidence confirmed</small></div>`;
+      <div class="stat"><span>Processing</span><strong>${processingRows.length}</strong><small>Hidden from completed ledger</small></div>
+      <div class="stat"><span>Errors</span><strong>${errorRows.length}</strong><small>Require retry or investigation</small></div>`;
   }
 
   function renderViewMenu() {
@@ -348,43 +417,34 @@
     empty.classList.toggle('hidden', rows.length !== 0);
     body.innerHTML = rows.map(row => {
       const fullItemTitle = row.itemNames.length ? row.itemNames.join(' · ') : '';
-      const items = row.itemStates?.length > 1
-        ? `${row.itemStates.length} products · ${row.returnedProductCount || 0} returned`
-        : (fullItemTitle || (row.hasReturn ? `${row.returnGroups.length} return${row.returnGroups.length === 1 ? '' : 's'} pending item identity` : 'Item title pending Order Details scan'));
-      const detailBadge = row.terminalCancelled
-        ? `<span class="badge">Terminal history</span>`
-        : row.detailComplete
-          ? `<span class="badge badge-reconciled">Detailed</span>`
-          : '<span class="badge">Detail queued</span>';
-      const bankConfirmed = row.hasReturn && row.returns.length && row.returns.every(ret => storage.isBankCreditConfirmed(ret));
-      const anyIssued = row.hasReturn && row.returns.some(ret => storage.returnStageRank(ret) >= storage.RETURN_STAGE_RANK.refund_issued);
-      const financialState = row.bankAmazonConflict
-        ? '<span class="credit-state credit-pending">Bank/Amazon conflict</span>'
-        : bankConfirmed
-          ? '<span class="credit-state credit-confirmed">Bank confirmed</span>'
-          : anyIssued
-            ? '<span class="credit-state credit-pending">Credit pending</span>'
-            : '';
-      return `<article class="ledger-order-card ledger-order-line ${row.hasReturn ? 'return-card-row' : ''} ${row.needsReview ? 'needs-review-card' : ''}">
+      const items = row.itemStates?.length > 1 ? `${row.itemStates.length} products · ${row.returnedProductCount || 0} returned` : (fullItemTitle || (row.hasReturn ? `${row.returnGroups.length} return${row.returnGroups.length === 1 ? '' : 's'} pending item identity` : 'Item title pending Order Details scan'));
+      const detailBadge = row.terminalCancelled ? `<span class="badge">Terminal history</span>` : row.dataComplete ? `<span class="badge badge-reconciled">Complete</span>` : row.processingError ? '<span class="badge badge-error">Error</span>' : '<span class="badge badge-processing">Processing</span>';
+      const bankConfirmed = row.dataComplete && row.hasReturn && row.returns.length && row.returns.every(ret => storage.isBankCreditConfirmed(ret));
+      const anyIssued = row.dataComplete && row.hasReturn && row.returns.some(ret => storage.returnStageRank(ret) >= storage.RETURN_STAGE_RANK.refund_issued);
+      const financialState = !row.dataComplete ? '' : row.bankAmazonConflict ? '<span class="credit-state credit-pending">Bank/Amazon conflict</span>' : bankConfirmed ? '<span class="credit-state credit-confirmed">Bank confirmed</span>' : anyIssued ? '<span class="credit-state credit-pending">Credit pending</span>' : '';
+      const progressMarkup = row.processingError
+        ? `<div class="processing-error"><strong>Order processing error</strong><span>${esc(row.processingError)}</span><small>Use Refresh to retry this order after the underlying Amazon issue is resolved.</small></div>`
+        : !row.dataComplete
+          ? `<div class="processing-state"><strong>${esc(row.processingState === 'retrying' ? 'Retrying order data' : 'Processing order data')}</strong><span>${esc(row.order?.processingLastIssue || `${row.authoritativeCount}/${row.expectedReturnCount} return-status pages complete`)}</span></div>`
+          : `${orderProductStatusMarkup(row)}${financialState}`;
+      return `<article class="ledger-order-card ledger-order-line ${row.hasReturn ? 'return-card-row' : ''} ${row.needsReview ? 'needs-review-card' : ''} ${row.processingError ? 'processing-error-card' : ''}">
         <div class="line-status">
           <span class="badge badge-${esc(row.stateKey)}">${esc(badgeLabel(row))}</span>
           <div class="detail-line compact-detail">${detailBadge}</div>
         </div>
         <div class="line-order-item">
-          <div class="line-order-meta"><span class="mono">${esc(row.orderId)}</span><span class="muted tiny">${formatDate(row.lastScannedAt)}</span></div>
+          <div class="line-order-meta"><span class="mono">${esc(row.orderId)}</span><span class="muted tiny">${formatDate(row.orderDate || row.lastScannedAt)}</span></div>
           <div class="item-title line-item-title" title="${esc(fullItemTitle || items)}">${esc(items)}</div>
           <div class="muted tiny line-amazon-status" title="${esc(row.amazonStatus || '—')}">${esc(row.amazonStatus || '—')}</div>
         </div>
         <div class="line-metric"><span>Order</span><strong>${money(row.orderTotal)}</strong></div>
         <div class="line-metric"><span>Refund</span><strong class="refund-money">${money(row.refundAmount)}</strong></div>
         <div class="line-metric"><span>Card</span><strong>${row.cardLast4 ? `•••• ${esc(row.cardLast4)}` : '—'}</strong></div>
-        <div class="line-progress">
-          ${`${orderProductStatusMarkup(row)}${financialState}`}
-        </div>
+        <div class="line-progress">${progressMarkup}</div>
         <div class="line-actions">
           <button class="mini action-large" data-open-url="${esc(row.openUrl)}" ${row.openUrl ? '' : 'disabled'}>Details</button>
-          <button class="mini action-large" data-action="reconcile" data-order="${esc(row.orderId)}" ${row.hasReturn ? '' : 'disabled'}>Credit</button>
-          <button class="mini action-large" data-action="reset" data-order="${esc(row.orderId)}" ${row.hasReturn ? '' : 'disabled'}>Reset</button>
+          <button class="mini action-large" data-action="reconcile" data-order="${esc(row.orderId)}" ${row.dataComplete && row.hasReturn ? '' : 'disabled'}>Credit</button>
+          <button class="mini action-large" data-action="reset" data-order="${esc(row.orderId)}" ${row.dataComplete && row.hasReturn ? '' : 'disabled'}>Reset</button>
           <button class="mini action-large" data-refresh-order="${esc(row.orderId)}" ${row.openUrl ? '' : 'disabled'}>Refresh</button>
         </div>
       </article>`;
@@ -424,7 +484,7 @@
     render();
   }
   function setView(view) {
-    if (!['all', 'returns', 'needs_review'].includes(view)) return;
+    if (!['all', 'returns', 'needs_review', 'processing', 'errors'].includes(view)) return;
     currentView = view;
     const url = new URL(location.href); url.searchParams.set('view', view); history.replaceState(null, '', url.toString());
     render();
@@ -461,6 +521,7 @@
     await reload();
   });
   search.addEventListener('input', render);
+  for (const control of [statusFilter, yearFilter, cardFilter, sortOrder]) control?.addEventListener('change', render);
 
   document.getElementById('startScanner').addEventListener('click', async () => {
     await chrome.runtime.sendMessage({ type: 'ARL_START_FULL_SCAN' }); await renderScannerStatus();
@@ -498,7 +559,7 @@
   }
 
   async function exportBankVerificationRequest() {
-    const rows = buildRows();
+    const rows = buildRows().filter(row => row.dataComplete);
     const pending = [];
     const seen = new Set();
     for (const row of rows) {
@@ -625,7 +686,7 @@
   document.getElementById('exportCsv').addEventListener('click', () => {
     const headers = ['status','order_id','product_count','returned_product_count','items','product_statuses','order_total','expected_refund','card_last4','amazon_status','detail_complete','order_details_url','last_scanned_at'];
     const lines = [headers.map(csvCell).join(',')];
-    for (const row of buildRows()) {
+    for (const row of buildRows().filter(row => row.dataComplete)) {
       const productStatuses = (row.itemStates || []).map(item => `${item.itemName} => ${(item.returnGroups || []).length ? stageLabel(storage.getReturnStage(item.returnGroups[0]?.representative)) : 'Not returned'}`).join(' | ');
       lines.push([row.statusLabel,row.orderId,row.itemStates?.length || row.itemNames.length,row.returnedProductCount || 0,row.itemNames.join(' | '),productStatuses,row.orderTotal ?? '',row.refundAmount ?? '',row.cardLast4 || '',row.amazonStatus,row.detailComplete,row.openUrl,row.lastScannedAt || ''].map(csvCell).join(','));
     }

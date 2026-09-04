@@ -341,3 +341,17 @@ html, body { max-width: 100%; overflow-x: hidden; }
 /* v0.18.8 five-stage Amazon return lifecycle. Bank verification renders separately. */
 .lifecycle-five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .lifecycle-five .lifecycle-line { left: 7%; right: 7%; }
+
+
+/* v0.18.9 complete-only ledger views and query controls */
+.ledger-filters { grid-template-columns: minmax(240px, 2fr) repeat(4, minmax(130px, 1fr)); align-items:center; }
+.ledger-filters select { width:100%; padding:9px 10px; border:1px solid #cfd4da; border-radius:7px; background:#fff; min-width:0; }
+.badge-processing { background:#eef3fa; color:#345b89; }
+.badge-error, .badge-error.badge { background:#fff0f0; color:#8b2525; }
+.processing-error-card { border-left:3px solid #b42318; background:#fffafa; }
+.processing-error, .processing-state { display:grid; gap:3px; padding:7px 9px; border:1px solid #ead1d1; border-radius:7px; background:#fff7f7; font-size:9px; line-height:1.25; overflow-wrap:anywhere; }
+.processing-state { border-color:#d7e0eb; background:#f7faff; }
+.processing-error strong { color:#8b2525; }
+.processing-error small, .processing-state span { color:#656d76; }
+@media (max-width: 1100px) { .ledger-filters { grid-template-columns: repeat(2, minmax(0,1fr)); } .ledger-filters #search { grid-column:1 / -1; } }
+@media (max-width: 650px) { .ledger-filters { grid-template-columns:1fr; } .ledger-filters #search { grid-column:auto; } }

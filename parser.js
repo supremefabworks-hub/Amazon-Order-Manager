@@ -298,12 +298,38 @@
     };
   }
 
+  function affirmativeReturnStageFromText(text) {
+    const lines = normalizeText(text).split('\n').map(line => line.trim()).filter(Boolean);
+    if (lines.some(line => /(?:your refund (?:has been|was) credited|we (?:have )?credited your refund|refund (?:has been|was) credited to|credited to your (?:original )?payment method on)/i.test(line))) return 'credited';
+    if (lines.some(line => /(?:we (?:have )?issued your refund|your refund (?:has been|was) issued|refund has been issued|refund issued\s+(?:on|\$))/i.test(line))) return 'refund_issued';
+    if (lines.some(line => /(?:we (?:have )?received your return|your return (?:has been|was) received|received your return|item (?:has been|was) received|return processed|your return is complete|return (?:has been|was) completed|return received\s+(?:on|at)\b)/i.test(line))) return 'received';
+    if (lines.some(line => {
+      if (/(?:drop off your return by|drop-off your return by|please drop off|once you drop off|when you drop off|time you have dropped off|after you drop off|before you drop off)/i.test(line)) return false;
+      return /(?:your return (?:has been|was) dropped off|you (?:have )?dropped off your return|drop-?off complete|return (?:is|has been) in transit|on the way back|return (?:has been|was) shipped|shipped back|carrier (?:has )?received (?:your )?return|dropped off\s+(?:on|at)\b)/i.test(line);
+    })) return 'shipped';
+    if (lines.some(line => /(?:return request (?:is )?(?:confirmed|accepted)|return initiated|return started|accepted your return)/i.test(line))) return 'started';
+    return 'unknown';
+  }
+
+  function explicitlyHiddenMilestoneNode(node) {
+    let current = node || null;
+    for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
+      if (current.hidden === true) return true;
+      const ariaHidden = String(current.getAttribute?.('aria-hidden') || '').toLowerCase();
+      if (ariaHidden === 'true') return true;
+      const style = String(current.getAttribute?.('style') || '').toLowerCase();
+      if (/(?:display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?:\D|$))/.test(style)) return true;
+      const cls = typeof current.className === 'string' ? current.className : String(current.getAttribute?.('class') || '');
+      if (/(?:^|\s)(?:aok-hidden|a-hidden|hidden|is-hidden|visually-hidden|milestone-hidden)(?:\s|$)/i.test(cls)) return true;
+    }
+    return false;
+  }
+
   function extractCompletedReturnMilestonesFromDom(container) {
     const done = { started: false, shipped: false, received: false, refundIssued: false, credited: false };
     if (!container?.querySelectorAll) return done;
     let checks = [];
     try { checks = Array.from(container.querySelectorAll('img[src*="milestone_checkmark" i], img[data-src*="milestone_checkmark" i], img[alt*="checkmark" i]')); } catch (_) {}
-    if (!checks.length) return done;
     const stageForLabel = line => {
       const value = normalizeText(line).toLowerCase();
       if (value === 'initiated' || value === 'return initiated' || value === 'return started') return 'started';
@@ -313,23 +339,19 @@
       if (value === 'refund credited' || value === 'credited') return 'credited';
       return null;
     };
-    const text = normalizeText(container.innerText || container.textContent || '');
-    const ordered = [];
-    for (const stage of text.split('\n').map(stageForLabel).filter(Boolean)) if (ordered.at(-1) !== stage) ordered.push(stage);
-    const canonical = ['started','shipped','received','refundIssued','credited'];
-    const prefixUsable = ordered.length >= 2 && ordered.every((stage,index) => canonical[index] === stage);
-    if (prefixUsable && checks.length <= ordered.length) {
-      for (let i=0;i<checks.length;i+=1) done[ordered[i]] = true;
-    } else {
-      for (const check of checks) {
-        let current = check.parentElement || null;
-        for (let depth=0; current && depth<5; depth+=1, current=current.parentElement) {
-          const local = normalizeText(current.innerText || current.textContent || '');
-          if (!local || local.length > 500) continue;
-          const labels = Array.from(new Set(local.split('\n').map(stageForLabel).filter(Boolean)));
-          if (labels.length === 1) { done[labels[0]] = true; break; }
-          if (labels.length > 1) break;
-        }
+    // Do not infer completion from the number of checkmark image elements. Amazon can retain
+    // future/hidden checkmark markup in detached return HTML. A checkmark is usable only when its
+    // own non-hidden local milestone container binds it to exactly one stage label.
+    for (const check of checks) {
+      if (explicitlyHiddenMilestoneNode(check)) continue;
+      let current = check.parentElement || null;
+      for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement) {
+        if (explicitlyHiddenMilestoneNode(current)) break;
+        const text = normalizeText(current.innerText || current.textContent || '');
+        if (!text || text.length > 650) continue;
+        const labels = Array.from(new Set(text.split('\n').map(stageForLabel).filter(Boolean)));
+        if (labels.length === 1) { done[labels[0]] = true; break; }
+        if (labels.length > 1) break;
       }
     }
     if (done.credited) done.refundIssued = true;
@@ -341,22 +363,35 @@
 
   function applyDomReturnMilestones(record, container) {
     if (!record || record.recordType !== 'return') return record;
+    const rawText = normalizeText(container?.innerText || container?.textContent || '');
+    const affirmativeStage = affirmativeReturnStageFromText(rawText);
+    const rank = { unknown:0, started:1, shipped:2, received:3, refund_issued:4, credited:5 };
+    const affirmativeRank = rank[affirmativeStage] || 0;
     const dom = extractCompletedReturnMilestonesFromDom(container);
+    if (affirmativeRank > 0) {
+      if (affirmativeRank < 5) dom.credited = false;
+      if (affirmativeRank < 4) dom.refundIssued = false;
+      if (affirmativeRank < 3) dom.received = false;
+      if (affirmativeRank < 2) dom.shipped = false;
+      if (affirmativeRank < 1) dom.started = false;
+    }
     if (!Object.values(dom).some(Boolean)) return record;
     const milestones = record.returnMilestones || parseReturnMilestones(record.statusText || '');
     for (const key of ['started', 'shipped', 'received', 'refundIssued', 'credited']) {
       if (!dom[key]) continue;
       const labels = key === 'started' ? ['Initiated','Return initiated','Return started'] : key === 'shipped' ? ['Dropped off','Drop off','Return shipped','Shipped'] : key === 'received' ? ['Return received','Received'] : key === 'refundIssued' ? ['Refund issued'] : ['Refund credited','Credited'];
-      milestones[key] = { ...(milestones[key] || {}), done: true, date: milestones[key]?.date || findMilestoneDate(normalizeText(container.innerText || container.textContent || ''), labels) || null };
+      milestones[key] = { ...(milestones[key] || {}), done: true, date: milestones[key]?.date || findMilestoneDate(rawText, labels) || null };
     }
-    const stage = dom.credited ? 'credited' : dom.refundIssued ? 'refund_issued' : dom.received ? 'received' : dom.shipped ? 'shipped' : dom.started ? 'started' : milestones.stage || 'unknown';
-    const rank = { unknown:0, started:1, shipped:2, received:3, refund_issued:4, credited:5 };
-    if ((rank[stage] || 0) > (rank[milestones.stage] || 0)) milestones.stage = stage;
+    const domStage = dom.credited ? 'credited' : dom.refundIssued ? 'refund_issued' : dom.received ? 'received' : dom.shipped ? 'shipped' : dom.started ? 'started' : 'unknown';
+    const textStage = parseReturnMilestones(rawText).stage || 'unknown';
+    let stage = (rank[domStage] || 0) > (rank[textStage] || 0) ? domStage : textStage;
+    if (affirmativeRank > 0 && (rank[stage] || 0) > affirmativeRank) stage = affirmativeStage;
+    milestones.stage = stage;
     record.returnMilestones = milestones;
-    record.returnStage = milestones.stage;
-    if ((rank[record.returnStage] || 0) >= 4) record.status = 'refunded';
-    else if (record.returnStage === 'received') record.status = 'returned_pending_refund';
-    else if ((rank[record.returnStage] || 0) >= 1) record.status = 'return_in_progress';
+    record.returnStage = stage;
+    if ((rank[stage] || 0) >= 4) record.status = 'refunded';
+    else if (stage === 'received') record.status = 'returned_pending_refund';
+    else if ((rank[stage] || 0) >= 1) record.status = 'return_in_progress';
     return record;
   }
 
@@ -1695,7 +1730,9 @@
     parseReturnMilestones,
     findExpectedCreditDate,
     extractStatusText,
+    affirmativeReturnStageFromText,
     extractCompletedReturnMilestonesFromDom,
+    applyDomReturnMilestones,
     parseTextRecord,
     parseDocument,
     makeRecordId,

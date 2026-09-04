@@ -956,6 +956,18 @@ async function advanceHistoryPage(tabId, result, job) {
   return null;
 }
 
+async function patchOrderProcessing(orderId, patch) {
+  const id = String(orderId || '').trim();
+  if (!/^\d{3}-\d{7}-\d{7}$/.test(id)) return false;
+  const data = await chrome.storage.local.get([LEDGER_KEY]);
+  const ledger = Array.isArray(data[LEDGER_KEY]) ? data[LEDGER_KEY] : [];
+  const index = ledger.findIndex(r => r?.recordType === 'order' && r?.orderId === id);
+  if (index < 0) return false;
+  ledger[index] = { ...ledger[index], ...patch, lastScannedAt: nowIso() };
+  await chrome.storage.local.set({ [LEDGER_KEY]: ledger });
+  return true;
+}
+
 async function forceRefreshOrder(orderId) {
   const id = String(orderId || '').trim();
   if (!/^\d{3}-\d{7}-\d{7}$/.test(id)) throw new Error('Invalid Amazon order ID.');
@@ -997,7 +1009,11 @@ async function forceRefreshOrder(orderId) {
       if (!matched) throw new Error('Amazon return-status page did not produce the expected authoritative return child.');
       returnsRefreshed += 1;
     }
+    await patchOrderProcessing(id, { orderDataComplete: true, processingState: 'complete', processingError: null, processingErrorAt: null, processingLastIssue: null, returnStatusExpectedCount: uniqueReturnLinks.size, returnStatusAuthoritativeCount: returnsRefreshed, returnStatusComplete: returnsRefreshed === uniqueReturnLinks.size, orderDataCompletedAt: nowIso() });
     return { ok: true, orderId: id, detailScannedAt: nowIso(), returnsRefreshed };
+  } catch (error) {
+    await patchOrderProcessing(id, { processingState: 'error', processingError: `refresh: ${error?.message || error}`.slice(0, 500), processingErrorAt: nowIso() });
+    throw error;
   } finally {
     try { await chrome.tabs.remove(tabId); } catch (_) {}
   }
@@ -1020,8 +1036,8 @@ async function pageDetailsComplete(pageOrderIds) {
   if (!ids.length) return true;
   const [state, data] = await Promise.all([getState(), chrome.storage.local.get([LEDGER_KEY])]);
   const ledger = Array.isArray(data[LEDGER_KEY]) ? data[LEDGER_KEY] : [];
-  const detailed = new Set(ledger.filter(r => r?.recordType === 'order' && r?.detailScanComplete).map(r => r.orderId));
-  return ids.every(id => state.crawl?.completedOrders?.[id] || detailed.has(id));
+  const ready = new Set(ledger.filter(r => r?.recordType === 'order' && r?.orderDataComplete === true).map(r => r.orderId));
+  return ids.every(id => state.crawl?.completedOrders?.[id] || ready.has(id));
 }
 
 async function runJob(job) {
@@ -1079,6 +1095,7 @@ async function runJob(job) {
   }
 
   if (job.type === 'detail') {
+    await patchOrderProcessing(job.orderId, { processingState: 'processing', processingError: null, processingErrorAt: null });
     // Keep the worker parked on Amazon and fetch the canonical Order Details HTML through the
     // authenticated content-script context. This avoids one full browser navigation per order.
     const state = ensureCrawl(await getState());
@@ -1215,6 +1232,16 @@ async function processNextJob() {
     // overwrite those newly queued jobs with the stale pre-job snapshot.
     const completionState = ensureCooldownPlan(await getState());
     completionState.processed += 1;
+    if (job.type === 'detail' && job.orderId) {
+      const nextAttempt = Number(job.attempts || 0) + (waitingForDetails ? 0 : 1);
+      if (success) {
+        await patchOrderProcessing(job.orderId, { processingState: 'complete', processingError: null, processingErrorAt: null, processingLastIssue: null });
+      } else if (jobError && (blocked || (!rateLimited && !waitingForDetails && nextAttempt >= 3))) {
+        await patchOrderProcessing(job.orderId, { processingState: 'error', processingError: jobError, processingErrorAt: nowIso(), processingLastIssue: jobError });
+      } else if (jobError) {
+        await patchOrderProcessing(job.orderId, { processingState: 'retrying', processingError: null, processingErrorAt: null, processingLastIssue: jobError });
+      }
+    }
     if (jobError && !waitingForDetails) {
       completionState.errors += 1;
       completionState.lastError = jobError;
