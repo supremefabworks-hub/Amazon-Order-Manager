@@ -19,6 +19,10 @@
   const navErrorCount = document.getElementById('navErrorCount');
   const bankBridgeStatus = document.getElementById('bankBridgeStatus');
   const bankResultFile = document.getElementById('bankResultFile');
+  const ledgerVersion = document.getElementById('ledgerVersion');
+  const manifest = chrome.runtime.getManifest();
+  const displayedVersion = String(manifest.version_name || manifest.version || '').trim();
+  if (ledgerVersion) ledgerVersion.textContent = `AMAZON REFUND LEDGER${displayedVersion ? ` · v${displayedVersion}` : ''}`;
   let ledger = [];
   let settings = storage.DEFAULT_SETTINGS;
   let currentView = new URLSearchParams(location.search).get('view') || 'all';
@@ -457,8 +461,7 @@
         <div class="line-actions">
           <button class="mini action-large" data-open-url="${esc(row.openUrl)}" ${row.openUrl ? '' : 'disabled'}>Details</button>
           <button class="mini action-large" data-action="reconcile" data-order="${esc(row.orderId)}" ${row.dataComplete && row.hasReturn ? '' : 'disabled'}>Credit</button>
-          <button class="mini action-large" data-action="reset" data-order="${esc(row.orderId)}" ${row.dataComplete && row.hasReturn ? '' : 'disabled'}>Reset</button>
-          <button class="mini action-large" data-refresh-order="${esc(row.orderId)}" ${row.openUrl ? '' : 'disabled'}>Refresh</button>
+          <button class="mini action-large" data-reset-refresh-order="${esc(row.orderId)}" ${row.openUrl ? '' : 'disabled'}>Reset & Refresh</button>
         </div>
       </article>`;
     }).join('');
@@ -507,20 +510,21 @@
     const button = event.target.closest('[data-view]'); if (button) setView(button.dataset.view);
   });
   body.addEventListener('click', async event => {
-    const refresh = event.target.closest('button[data-refresh-order]');
-    if (refresh && !refresh.disabled) {
-      const original = refresh.textContent;
-      refresh.disabled = true;
-      refresh.textContent = 'Refreshing…';
+    const resetRefresh = event.target.closest('button[data-reset-refresh-order]');
+    if (resetRefresh && !resetRefresh.disabled) {
+      const original = resetRefresh.textContent;
+      resetRefresh.disabled = true;
+      resetRefresh.textContent = 'Rebuilding…';
       try {
-        const response = await chrome.runtime.sendMessage({ type: 'ARL_REFRESH_ORDER', orderId: refresh.dataset.refreshOrder });
-        if (!response?.ok) throw new Error(response?.error || 'Refresh failed');
+        const response = await chrome.runtime.sendMessage({ type: 'ARL_RESET_REFRESH_ORDER', orderId: resetRefresh.dataset.resetRefreshOrder });
+        if (!response?.ok) throw new Error(response?.error || 'Reset & Refresh failed');
         await reload();
       } catch (error) {
-        alert(`Order refresh failed: ${error?.message || error}`);
+        alert(`Order rebuild failed: ${error?.message || error}`);
+        await reload().catch(() => {});
       } finally {
-        refresh.disabled = false;
-        refresh.textContent = original;
+        resetRefresh.disabled = false;
+        resetRefresh.textContent = original;
       }
       return;
     }
@@ -528,9 +532,9 @@
     if (open && open.dataset.openUrl) { await chrome.tabs.create({ url: open.dataset.openUrl }); return; }
     const action = event.target.closest('button[data-action]');
     if (!action) return;
-    const manualState = action.dataset.action === 'reconcile' ? 'reconciled' : null;
+    if (action.dataset.action !== 'reconcile') return;
     const matching = ledger.filter(r => r.recordType === 'return' && r.orderId === action.dataset.order);
-    for (const record of matching) await storage.updateRecord(record.recordId, { manualState });
+    for (const record of matching) await storage.updateRecord(record.recordId, { manualState: 'reconciled' });
     await reload();
   });
   search.addEventListener('input', render);

@@ -146,3 +146,7 @@ Treat replacement and return as independent product workflows. Only suppress a r
 
 ### Smart-fast pacing rule
 The v0.18.12 default crawler is serial and adaptive: 75–250 ms inter-job delay, 60–90-job normal bursts, 8–15 sec normal cooldown, unchanged 10–20 min Amazon throttle cooldown. Rendered pages use job-specific readiness polling, but readiness only controls when parsing starts; authoritative parser/completeness/fingerprint gates remain mandatory and a readiness timeout falls through to normal scanning. Never add parallel Amazon jobs as a speed optimization without an explicit architecture decision and new safety review.
+
+
+### Order recovery action
+Use one `Reset & Refresh` action only. It is an authoritative rebuild: preserve only the Order ID and captured real Order Details route, clear all order-scoped derived ledger data, then rebuild from Amazon under the serial worker lock. A failed rebuild must remain retryable in Errors. Dashboard version text must always come from the installed manifest, never a hard-coded string.

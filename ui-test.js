@@ -4,14 +4,14 @@ const dashboard = fs.readFileSync(__dirname + '/dashboard.js', 'utf8');
 const content = fs.readFileSync(__dirname + '/content.js', 'utf8');
 const background = fs.readFileSync(__dirname + '/background.js', 'utf8');
 const css = fs.readFileSync(__dirname + '/ui.css', 'utf8');
-for (const label of ['Details</button>', 'Credit</button>', 'Reset</button>', 'Refresh</button>']) assert(dashboard.includes(label), `dashboard must render fixed ${label.split('<')[0]} action`);
-assert(dashboard.includes("type: 'ARL_REFRESH_ORDER'"), 'Refresh button must request background-tab refresh');
-assert(background.includes('async function forceRefreshOrder'), 'background worker must implement rendered forced refresh');
+for (const label of ['Details</button>', 'Credit</button>', 'Reset & Refresh</button>']) assert(dashboard.includes(label), `dashboard must render fixed ${label.split('<')[0]} action`);
+assert(dashboard.includes("type: 'ARL_RESET_REFRESH_ORDER'"), 'Reset & Refresh must request the authoritative rebuild path');
+assert(background.includes('async function forceResetRefreshOrder'), 'background worker must implement authoritative reset-and-refresh recovery');
 assert(background.includes("active: false"), 'forced refresh must use an inactive tab');
 assert(content.includes('/\\/spr\\/returns\\/prep/i'), 'detail fetch must follow real return prep links');
 assert(!dashboard.includes('return `https://www.amazon.com/your-orders/order-details?orderID='), 'dashboard must not synthesize canonical detail URLs');
 assert(!background.includes('function syntheticDetailUrl'), 'background must not synthesize canonical detail URLs');
-assert(css.includes('grid-template-columns: repeat(4, minmax(0, 1fr))'), 'actions must stay side-by-side in four fixed columns');
+assert(css.includes('grid-template-columns: repeat(3, minmax(0, 1fr))'), 'actions must stay side-by-side in three fixed columns');
 assert(css.includes('min-height: 36px'), 'actions must use enlarged click targets');
 assert(css.includes('overflow-x: hidden'), 'ledger must continue forbidding horizontal order scrolling');
 assert(dashboard.includes('groupReturnRecords'), 'dashboard must group child return records by Amazon return token');
@@ -106,3 +106,14 @@ assert(dashboardV01811.includes("value === 'replacement'"), 'replacement orders 
 assert(htmlV01811.includes('<option value="replacement">Replacement</option>'), 'status filter must include Replacement');
 assert(dashboardV01811.includes("item.replacementNoReturnRequired ? 'No return required'"), 'product UI must expose no-return-required replacement evidence');
 console.log('v0.18.11 replacement UI regressions passed');
+
+
+const dashboardHtmlV01813 = fs.readFileSync(__dirname + '/dashboard.html', 'utf8');
+const dashboardJsV01813 = fs.readFileSync(__dirname + '/dashboard.js', 'utf8');
+assert(!dashboardHtmlV01813.includes('AMAZON REFUND LEDGER · v0.16'), 'dashboard must not hard-code stale v0.16 text');
+assert(dashboardHtmlV01813.includes('id="ledgerVersion"'), 'dashboard must expose a dynamic version host');
+assert(dashboardJsV01813.includes('chrome.runtime.getManifest()') && dashboardJsV01813.includes('manifest.version_name || manifest.version'), 'dashboard version must come from the installed manifest');
+assert(dashboardJsV01813.includes('data-reset-refresh-order') && dashboardJsV01813.includes('Reset & Refresh'), 'order row must expose one combined Reset & Refresh action');
+assert(!dashboardJsV01813.includes('data-refresh-order=') && !dashboardJsV01813.includes('data-action="reset"'), 'separate Reset and Refresh controls must be removed');
+assert(dashboardJsV01813.includes("type: 'ARL_RESET_REFRESH_ORDER'"), 'combined button must call the authoritative rebuild path');
+console.log('v0.18.13 reset-refresh/version UI regressions passed');

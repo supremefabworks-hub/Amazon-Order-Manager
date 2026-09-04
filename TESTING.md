@@ -323,3 +323,12 @@ A user-testable development build may merge only after `npm test` and PR CI pass
 4. Confirm multi-product, return lifecycle, replacement-only, payment-card, and complete-only ledger behavior remain unchanged.
 5. Watch scanner status for rate limiting/human verification. If Amazon throttles, confirm the crawler requeues the job and enters the unchanged 10–20 minute cooldown rather than retrying aggressively.
 6. Record pages/orders completed and any throttle count before closing Issue #35.
+
+
+## v0.18.13 live acceptance
+1. Verify dashboard header shows the actual installed `0.18.13` version, not `v0.16`.
+2. Pick a complete order and click `Reset & Refresh`. Confirm there is no separate Reset or Refresh button.
+3. Confirm the order temporarily leaves completed views while rebuilding, then returns with fresh canonical product/return/replacement/refund/payment state.
+4. Confirm prior manual bank/reconciliation state for that Order ID is cleared by the rebuild.
+5. Test one forced/real refresh failure if available: the order must remain in Errors with its real Details URL and exact error, then successfully rebuild when retried.
+6. Run alongside/resume the lifetime crawler and verify no concurrent Amazon job race or skipped page occurs.

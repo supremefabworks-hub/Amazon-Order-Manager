@@ -1006,7 +1006,7 @@ async function patchOrderProcessing(orderId, patch) {
   return true;
 }
 
-async function forceRefreshOrder(orderId) {
+async function resetOrderForAuthoritativeRefresh(orderId) {
   const id = String(orderId || '').trim();
   if (!/^\d{3}-\d{7}-\d{7}$/.test(id)) throw new Error('Invalid Amazon order ID.');
   const data = await chrome.storage.local.get([LEDGER_KEY]);
@@ -1014,9 +1014,76 @@ async function forceRefreshOrder(orderId) {
   const order = ledger.find(r => r?.recordType === 'order' && r?.orderId === id) || null;
   const detailUrl = order?.orderDetailsUrl || null;
   if (!detailUrl || !/(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html|order-details)/i.test(detailUrl)) {
-    throw new Error('This order has no real captured View order details URL. Refresh cannot invent one.');
+    throw new Error('This order has no real captured View order details URL. Reset & Refresh cannot invent one.');
   }
-  const tab = await chrome.tabs.create({ url: detailUrl, active: false });
+
+  const now = nowIso();
+  const shell = {
+    recordId: `order:${id}`,
+    recordType: 'order',
+    orderId: id,
+    orderDetailsUrl: detailUrl,
+    detailScanComplete: false,
+    orderDataComplete: false,
+    returnStatusExpectedCount: 0,
+    returnStatusAuthoritativeCount: 0,
+    returnStatusComplete: false,
+    status: 'purchase',
+    statusText: 'Reset for authoritative refresh',
+    processingState: 'processing',
+    processingError: null,
+    processingErrorAt: null,
+    processingLastIssue: null,
+    firstSeenAt: order?.firstSeenAt || now,
+    lastScannedAt: now
+  };
+  const freshLedger = ledger.filter(record => record?.orderId !== id);
+  freshLedger.push(shell);
+  await chrome.storage.local.set({ [LEDGER_KEY]: freshLedger });
+
+  const state = ensureCrawl(await getState());
+  const previousCrawlCompletion = state.crawl?.completedOrders?.[id] || null;
+  if (state.crawl?.completedOrders?.[id]) {
+    delete state.crawl.completedOrders[id];
+    state.crawl.ordersCompleted = Math.max(0, Number(state.crawl.ordersCompleted || 0) - 1);
+    if (state.crawl.currentPageOrderIds?.includes(id)) {
+      state.crawl.currentPageCompleted = state.crawl.currentPageOrderIds.filter(orderId => state.crawl.completedOrders[orderId]).length;
+    }
+  }
+  for (const key of Object.keys(state.recent || {})) {
+    if (key.includes(id)) delete state.recent[key];
+  }
+  await setState(state);
+  return { id, detailUrl, previousCrawlCompletion };
+}
+
+async function restoreCrawlCompletionAfterAuthoritativeRefresh(id, previousCrawlCompletion = null) {
+  const state = ensureCrawl(await getState());
+  if (!state.crawl?.active && !previousCrawlCompletion) return;
+  if (!state.crawl.completedOrders[id]) {
+    state.crawl.completedOrders[id] = {
+      ...(previousCrawlCompletion || {}),
+      at: nowIso(),
+      refreshedManually: true
+    };
+    state.crawl.ordersCompleted = Number(state.crawl.ordersCompleted || 0) + 1;
+  }
+  if (state.crawl.currentPageOrderIds?.includes(id)) {
+    state.crawl.currentPageCompleted = state.crawl.currentPageOrderIds.filter(orderId => state.crawl.completedOrders[orderId]).length;
+  }
+  await setState(state);
+}
+
+async function forceResetRefreshOrder(orderId) {
+  const waitDeadline = Date.now() + 60000;
+  while (processing && Date.now() < waitDeadline) await delay(randomBetween(75, 125));
+  if (processing) throw new Error('The Amazon crawler is still busy. Try Reset & Refresh again after the current request finishes.');
+  processing = true;
+  let resetContext = null;
+  try {
+    resetContext = await resetOrderForAuthoritativeRefresh(orderId);
+    const { id, detailUrl } = resetContext;
+    const tab = await chrome.tabs.create({ url: detailUrl, active: false });
   const tabId = tab?.id;
   if (!Number.isInteger(tabId)) throw new Error('Could not create the inactive Amazon refresh tab.');
   try {
@@ -1048,12 +1115,22 @@ async function forceRefreshOrder(orderId) {
       returnsRefreshed += 1;
     }
     await patchOrderProcessing(id, { orderDataComplete: true, processingState: 'complete', processingError: null, processingErrorAt: null, processingLastIssue: null, returnStatusExpectedCount: uniqueReturnLinks.size, returnStatusAuthoritativeCount: returnsRefreshed, returnStatusComplete: returnsRefreshed === uniqueReturnLinks.size, orderDataCompletedAt: nowIso() });
-    return { ok: true, orderId: id, detailScannedAt: nowIso(), returnsRefreshed };
+    await restoreCrawlCompletionAfterAuthoritativeRefresh(id, resetContext?.previousCrawlCompletion || null);
+    return { ok: true, orderId: id, detailScannedAt: nowIso(), returnsRefreshed, resetAndRefreshed: true };
+    } catch (error) {
+      const id = resetContext?.id || String(orderId || '').trim();
+      if (/^\d{3}-\d{7}-\d{7}$/.test(id)) {
+        await patchOrderProcessing(id, { processingState: 'error', orderDataComplete: false, processingError: `reset-refresh: ${error?.message || error}`.slice(0, 500), processingErrorAt: nowIso(), processingLastIssue: `reset-refresh: ${error?.message || error}`.slice(0, 500) });
+      }
+      throw error;
+    } finally {
+      processing = false;
+      const state = ensureCrawl(await getState().catch(() => defaultState()));
+      if (!state.paused && state.queue?.length) scheduleSoon(randomBetween(75, 250));
+    }
   } catch (error) {
-    await patchOrderProcessing(id, { processingState: 'error', processingError: `refresh: ${error?.message || error}`.slice(0, 500), processingErrorAt: nowIso() });
+    processing = false;
     throw error;
-  } finally {
-    try { await chrome.tabs.remove(tabId); } catch (_) {}
   }
 }
 
@@ -1455,8 +1532,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'ARL_REFRESH_ORDER') {
-    forceRefreshOrder(message.orderId)
+  if (message.type === 'ARL_RESET_REFRESH_ORDER') {
+    forceResetRefreshOrder(message.orderId)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
