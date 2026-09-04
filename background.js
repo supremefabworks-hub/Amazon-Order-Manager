@@ -591,9 +591,19 @@ function makeScanSessionId() {
   return `scan-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
+function deeperHistoricalFrontier(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  const ay = Number(a.year), by = Number(b.year);
+  if (Number.isFinite(ay) && Number.isFinite(by) && ay !== by) return ay < by ? a : b;
+  const ap = Math.max(1, Number(a.page) || 1), bp = Math.max(1, Number(b.page) || 1);
+  return ap >= bp ? a : b;
+}
+
 function snapshotHistoricalFrontier(crawl) {
-  if (!crawl?.currentYear) return crawl?.priorFrontier || null;
-  return {
+  const previous = crawl?.priorFrontier || null;
+  if (!crawl?.currentYear) return previous;
+  const current = {
     capturedAt: nowIso(),
     year: Number(crawl.currentYear),
     page: Math.max(1, Number(crawl.currentPage) || 1),
@@ -602,6 +612,7 @@ function snapshotHistoricalFrontier(crawl) {
     ordersCompleted: Object.keys(crawl.completedOrders || {}).length,
     lastCompletedOrderId: crawl.lastCompletedOrderId || null
   };
+  return deeperHistoricalFrontier(current, previous);
 }
 
 function beginNewestScanSession(state, source = 'manual-resume', startYear = null) {

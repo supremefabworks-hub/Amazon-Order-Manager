@@ -166,6 +166,7 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
   state = store.backgroundScanState;
   const secondSessionId = state.crawl.sessionId;
   assert(secondSessionId && secondSessionId !== firstSessionId, 'second Start must create a new scan session');
+  assert(state.crawl.priorFrontier?.pageKey === '2026:31', 'restarting again near page 1 must retain the deepest prior historical frontier');
   assert(state.queue[0].historyPage === 1 && state.queue[0].url.includes('/pagination/1/'), 'every new session must start at newest page 1');
   assert(Object.keys(state.crawl.overlapRefreshedOrders || {}).length === 0, 'per-session known-order refresh markers must reset on new Start');
   await sandbox.queueManagedHistoryResult({
