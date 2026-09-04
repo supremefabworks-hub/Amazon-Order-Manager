@@ -30,6 +30,18 @@ jobs:
           PY
       - name: Apply v0.18.6 fixes
         run: python3 tools/apply_v0186.py
+      - name: Correct pager regression fixture
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('parser-test.js')
+          text = path.read_text(encoding='utf-8')
+          old = "      if (inPager && /pagination/i.test(selector)) return { className: 'a-pagination' };"
+          new = "      if (inPager && /(?:\\.a-pagination|ul\\.a-pagination|aria-label\\*?=.?pagination|data-testid\\*?=.?pagination)/i.test(selector)) return { className: 'a-pagination' };"
+          if old not in text:
+              raise SystemExit('pager fixture matcher not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Validate generated source
         run: |
           node --check parser.js
