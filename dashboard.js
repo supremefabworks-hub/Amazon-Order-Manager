@@ -2,6 +2,7 @@
   'use strict';
 
   const storage = window.AmazonRefundStorage;
+  const itemModel = window.AmazonOrderItemModel;
   const body = document.getElementById('ledgerBody');
   const stats = document.getElementById('stats');
   const empty = document.getElementById('empty');
@@ -141,6 +142,8 @@
       const order = orders.get(orderId) || null;
       const returnRecords = dedupeReturns(returns.get(orderId) || []);
       const returnGroups = groupReturnRecords(returnRecords);
+      const itemJoin = itemModel?.joinOrderItems(order, returnGroups) || { items: [], unmatchedReturnGroups: returnGroups.map(group => ({ group, identityStrength: 'weak', bestScore: 0 })), returnedProductCount: 0 };
+      const strongUnmatchedReturnIdentity = itemJoin.unmatchedReturnGroups.some(entry => entry.identityStrength === 'strong');
       const manualReconciled = returnRecords.some(r => r.manualState === 'reconciled');
       const ranks = returnRecords.map(r => storage.returnStageRank(r));
       const hasReturn = returnRecords.length > 0;
@@ -148,7 +151,9 @@
       const allCredited = hasReturn && returnRecords.every(r => storage.isCreditConfirmed(r));
       const allIssued = hasReturn && ranks.every(rank => rank >= storage.RETURN_STAGE_RANK.refund_issued);
 
-      const orderItemNames = uniqueStrings(order?.itemNames || []);
+      const capturedOrderItemNames = uniqueStrings(order?.itemNames || []);
+      const structuredOrderItemNames = uniqueStrings(itemJoin.items.map(item => item.itemName));
+      const orderItemNames = structuredOrderItemNames.length ? structuredOrderItemNames : capturedOrderItemNames;
       const returnedItemNames = uniqueStrings(returnGroups.flatMap(group => group.itemNames || []));
       const childRefundAmount = returnGroups.reduce((total, group) => total + (Number.isFinite(Number(group.amount)) ? Number(group.amount) : 0), 0);
       const canonicalRefundCandidate = order?.canonicalRefundTotal;
@@ -160,7 +165,7 @@
       const itemIdentityConflict = returnGroups.some(group => group.itemIdentityConflict);
       const groupAmountConflict = returnGroups.some(group => group.amountConflict);
       const needsReview = hasReturn && !manualReconciled && (
-        returnRecords.some(r => storage.needsCreditReview(r)) || refundAmountMismatch || itemIdentityConflict || groupAmountConflict
+        returnRecords.some(r => storage.needsCreditReview(r)) || refundAmountMismatch || itemIdentityConflict || groupAmountConflict || strongUnmatchedReturnIdentity
       );
 
       let stateKey = 'purchase';
@@ -172,6 +177,7 @@
         if (refundAmountMismatch) statusLabel = 'Refund amount mismatch';
         else if (itemIdentityConflict) statusLabel = 'Item needs review';
         else if (groupAmountConflict) statusLabel = 'Return refund needs review';
+        else if (strongUnmatchedReturnIdentity) statusLabel = 'Returned item needs matching';
         else {
           const lowest = returnRecords.slice().sort((a,b) => storage.returnStageRank(a)-storage.returnStageRank(b))[0];
           statusLabel = stageLabel(storage.getReturnStage(lowest));
@@ -182,12 +188,13 @@
 
       const statusTexts = uniqueStrings(returnRecords.map(r => r.statusText).filter(Boolean));
       const lastScannedAt = [order?.lastScannedAt, ...returnRecords.map(r => r.lastScannedAt)].filter(Boolean).sort().at(-1) || null;
-      const itemNames = hasReturn ? returnedItemNames : orderItemNames;
+      const itemNames = orderItemNames.length ? orderItemNames : returnedItemNames;
       rows.push({
         orderId, order, returns: returnRecords, returnGroups, hasReturn, needsReview, terminalCancelled, stateKey, statusLabel,
+        itemStates: itemJoin.items, unmatchedReturnGroups: itemJoin.unmatchedReturnGroups, returnedProductCount: itemJoin.returnedProductCount,
         itemNames, orderItemNames, returnedItemNames, searchItemNames: uniqueStrings([...orderItemNames, ...returnedItemNames]),
         orderTotal: order?.purchaseAmount ?? null, refundAmount, canonicalRefundTotal, childRefundAmount,
-        refundAmountMismatch, itemIdentityConflict, groupAmountConflict,
+        refundAmountMismatch, itemIdentityConflict, groupAmountConflict, strongUnmatchedReturnIdentity,
         cardLast4: order?.cardLast4 || returnRecords.find(r => r.cardLast4)?.cardLast4 || null,
         amazonStatus: statusTexts.length ? statusTexts.join(' · ') : (order?.statusText || order?.status || '—'),
         detailComplete: Boolean(order?.detailScanComplete), detailScannedAt: order?.detailScannedAt || null,
@@ -240,9 +247,39 @@
       ${verificationMarkup}
     </div>`;
   }
-  function returnProgressMarkup(row) {
+  function legacyReturnProgressMarkup(row) {
     if (!row.returnGroups.length) return '<span class="muted">—</span>';
     return `<div class="return-track-stack compact-return-stack">${row.returnGroups.map((group, index) => lifecycleMarkup(group, index + 1, row.returnGroups.length)).join('')}</div>`;
+  }
+
+  function orderProductStatusMarkup(row) {
+    if (!row.itemStates?.length) return row.hasReturn ? legacyReturnProgressMarkup(row) : `<span class="muted tiny">${esc(row.statusLabel || 'Order')}</span>`;
+    const products = row.itemStates.map((item, index) => {
+      const groups = item.returnGroups || [];
+      const representatives = groups.map(group => group.representative).filter(Boolean);
+      const highest = representatives.slice().sort((a,b) => storage.returnStageRank(b) - storage.returnStageRank(a))[0] || null;
+      const returnLabel = groups.length ? `${groups.length > 1 ? `${groups.length} returns · ` : ''}${stageLabel(storage.getReturnStage(highest))}` : 'Not returned';
+      const meta = [
+        item.quantity != null ? `Qty ${item.quantity}` : '',
+        item.itemAmount != null ? money(item.itemAmount) : '',
+        item.asin || '',
+        item.fulfillmentStatus || ''
+      ].filter(Boolean).join(' · ');
+      return `<div class="order-product-row ${groups.length ? 'has-product-return' : ''}">
+        <div class="order-product-head">
+          <div><span class="order-product-index">${index + 1}</span><strong title="${esc(item.itemName)}">${esc(item.itemName)}</strong></div>
+          <span class="product-state ${groups.length ? 'product-returned' : 'product-not-returned'}">${esc(returnLabel)}</span>
+        </div>
+        ${meta ? `<div class="muted tiny order-product-meta">${esc(meta)}</div>` : ''}
+        ${groups.length ? `<div class="product-return-lifecycles">${groups.map((group, returnIndex) => lifecycleMarkup(group, returnIndex + 1, groups.length)).join('')}</div>` : ''}
+      </div>`;
+    }).join('');
+    const unmatched = (row.unmatchedReturnGroups || []).map((entry, index) => {
+      const group = entry.group;
+      const title = group?.itemNames?.length ? group.itemNames.join(' · ') : 'Returned item with no purchased-item match';
+      return `<div class="order-product-row unmatched-product-return"><div class="order-product-head"><div><span class="order-product-index">!</span><strong>${esc(title)}</strong></div><span class="product-state product-unmatched">Unmatched return</span></div>${lifecycleMarkup(group, index + 1, row.unmatchedReturnGroups.length)}</div>`;
+    }).join('');
+    return `<div class="order-product-stack">${products}${unmatched}</div>`;
   }
 
   function filteredRows() {
@@ -264,7 +301,7 @@
   }
   function needsReviewExpectedAmount(row) {
     const recordTotal = returnRecordAmountTotal((row.returns || []).filter(r => storage.needsCreditReview(r)));
-    if (row.refundAmountMismatch || row.itemIdentityConflict || row.groupAmountConflict) {
+    if (row.refundAmountMismatch || row.itemIdentityConflict || row.groupAmountConflict || row.strongUnmatchedReturnIdentity) {
       const orderExpected = row.refundAmount;
       if (orderExpected !== null && orderExpected !== undefined && orderExpected !== '' && Number.isFinite(Number(orderExpected))) return Number(orderExpected);
     }
@@ -309,7 +346,10 @@
     const rows = filteredRows();
     empty.classList.toggle('hidden', rows.length !== 0);
     body.innerHTML = rows.map(row => {
-      const items = row.itemNames.length ? row.itemNames.join(' · ') : (row.hasReturn ? `${row.returnGroups.length} return${row.returnGroups.length === 1 ? '' : 's'} pending item identity` : 'Item title pending Order Details scan');
+      const fullItemTitle = row.itemNames.length ? row.itemNames.join(' · ') : '';
+      const items = row.itemStates?.length > 1
+        ? `${row.itemStates.length} products · ${row.returnedProductCount || 0} returned`
+        : (fullItemTitle || (row.hasReturn ? `${row.returnGroups.length} return${row.returnGroups.length === 1 ? '' : 's'} pending item identity` : 'Item title pending Order Details scan'));
       const detailBadge = row.terminalCancelled
         ? `<span class="badge">Terminal history</span>`
         : row.detailComplete
@@ -329,14 +369,14 @@
         </div>
         <div class="line-order-item">
           <div class="line-order-meta"><span class="mono">${esc(row.orderId)}</span><span class="muted tiny">${formatDate(row.lastScannedAt)}</span></div>
-          <div class="item-title line-item-title" title="${esc(items)}">${esc(items)}</div>
+          <div class="item-title line-item-title" title="${esc(fullItemTitle || items)}">${esc(items)}</div>
           <div class="muted tiny line-amazon-status" title="${esc(row.amazonStatus || '—')}">${esc(row.amazonStatus || '—')}</div>
         </div>
         <div class="line-metric"><span>Order</span><strong>${money(row.orderTotal)}</strong></div>
         <div class="line-metric"><span>Refund</span><strong class="refund-money">${money(row.refundAmount)}</strong></div>
         <div class="line-metric"><span>Card</span><strong>${row.cardLast4 ? `•••• ${esc(row.cardLast4)}` : '—'}</strong></div>
         <div class="line-progress">
-          ${row.hasReturn ? `${returnProgressMarkup(row)}${financialState}` : `<span class="muted tiny">${esc(row.statusLabel || 'Order')}</span>`}
+          ${`${orderProductStatusMarkup(row)}${financialState}`}
         </div>
         <div class="line-actions">
           <button class="mini action-large" data-open-url="${esc(row.openUrl)}" ${row.openUrl ? '' : 'disabled'}>Details</button>
@@ -580,9 +620,12 @@
 
   function csvCell(value) { const s = String(value ?? ''); return `"${s.replace(/"/g, '""')}"`; }
   document.getElementById('exportCsv').addEventListener('click', () => {
-    const headers = ['status','order_id','items','order_total','expected_refund','card_last4','amazon_status','detail_complete','order_details_url','last_scanned_at'];
+    const headers = ['status','order_id','product_count','returned_product_count','items','product_statuses','order_total','expected_refund','card_last4','amazon_status','detail_complete','order_details_url','last_scanned_at'];
     const lines = [headers.map(csvCell).join(',')];
-    for (const row of buildRows()) lines.push([row.statusLabel,row.orderId,row.itemNames.join(' | '),row.orderTotal ?? '',row.refundAmount ?? '',row.cardLast4 || '',row.amazonStatus,row.detailComplete,row.openUrl,row.lastScannedAt || ''].map(csvCell).join(','));
+    for (const row of buildRows()) {
+      const productStatuses = (row.itemStates || []).map(item => `${item.itemName} => ${(item.returnGroups || []).length ? stageLabel(storage.getReturnStage(item.returnGroups[0]?.representative)) : 'Not returned'}`).join(' | ');
+      lines.push([row.statusLabel,row.orderId,row.itemStates?.length || row.itemNames.length,row.returnedProductCount || 0,row.itemNames.join(' | '),productStatuses,row.orderTotal ?? '',row.refundAmount ?? '',row.cardLast4 || '',row.amazonStatus,row.detailComplete,row.openUrl,row.lastScannedAt || ''].map(csvCell).join(','));
+    }
     download(`amazon-refund-ledger-${new Date().toISOString().slice(0,10)}.csv`, lines.join('\n'), 'text/csv;charset=utf-8');
   });
   document.getElementById('exportJson').addEventListener('click', () => {

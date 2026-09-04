@@ -274,3 +274,12 @@ A user-testable development build may merge only after `npm test` and PR CI pass
 3. On a pager where page 18 is selected and Next is disabled, confirm the crawler does not attempt page 19.
 4. Confirm the current year is marked complete and page 1 of the next older discovered year is queued.
 5. Confirm a non-final page with enabled Next or a concrete numeric N+1 still advances only after the Order-ID fingerprint changes.
+
+
+## v0.18.7 live acceptance
+1. Allow the verified updater to install v0.18.7 automatically and run a fresh scan (dev version reset clears stale false milestone state).
+2. Order `111-1790078-4741015`: verify only Initiated is complete while Amazon still says `Drop off your return by Sep 8`; Dropped off / Return received / Refund issued / credited must remain incomplete.
+3. Verify a genuinely dropped-off/received/refunded return still advances when Amazon provides affirmative completion evidence or a completed timeline checkmark.
+4. Verify a multi-product order (e.g. six purchased products / four returned) displays six product rows under one order, four with their own return lifecycles and two as `Not returned`.
+5. Confirm item quantity/price stay `—`/absent when Amazon does not directly prove them; no order-total allocation.
+6. Observe throughput improvement while confirming no duplicate page/order regression and no new rate-limit behavior.

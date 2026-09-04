@@ -65,13 +65,42 @@
     return out;
   }
 
+  function normalizeOrderItems(items) {
+    const out = [];
+    const seen = new Set();
+    for (const raw of items || []) {
+      if (!raw || typeof raw !== 'object') continue;
+      const asin = String(raw.asin || '').trim().toUpperCase();
+      const itemName = String(raw.itemName || '').trim();
+      const itemKey = String(raw.itemKey || (asin ? `asin:${asin}` : '')).trim();
+      if (!itemKey || !itemName || seen.has(itemKey.toLowerCase())) continue;
+      seen.add(itemKey.toLowerCase());
+      const quantity = raw.quantity === null || raw.quantity === undefined || raw.quantity === '' ? null : Number(raw.quantity);
+      const itemAmount = raw.itemAmount === null || raw.itemAmount === undefined || raw.itemAmount === '' ? null : Number(raw.itemAmount);
+      out.push({
+        itemKey,
+        asin: /^[A-Z0-9]{10}$/.test(asin) ? asin : null,
+        itemName: itemName.slice(0, 400),
+        quantity: Number.isInteger(quantity) && quantity > 0 ? quantity : null,
+        itemAmount: Number.isFinite(itemAmount) ? itemAmount : null,
+        fulfillmentStatus: raw.fulfillmentStatus ? String(raw.fulfillmentStatus).slice(0, 180) : null,
+        source: raw.source ? String(raw.source).slice(0, 80) : null
+      });
+    }
+    return out;
+  }
+
+
   function stageFromText(text) {
-    const t = String(text || '').toLowerCase();
-    if (/(?:your refund (?:has been|was) credited|we (?:have )?credited your refund|refund (?:has been|was) credited to)/.test(t)) return 'credited';
-    if (/(?:we (?:have )?issued your refund|your refund (?:has been|was) issued|refund has been issued|refund issued\s+(?:on|\$))/.test(t)) return 'refund_issued';
-    if (/return (?:received|complete|completed)|received your return|item received|return processed/.test(t)) return 'received';
-    if (/return in transit|on the way back|return shipped|shipped back|dropped off|drop-?off complete|carrier received/.test(t)) return 'shipped';
-    if (/return request|accepted your return|drop off by|dropoff by|return code|refund will be issued|estimated refund|refund method|refund subtotal|return status link detected/.test(t)) return 'started';
+    const lines = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if (lines.some(line => /(?:your refund (?:has been|was) credited|we (?:have )?credited your refund|refund (?:has been|was) credited to)/i.test(line))) return 'credited';
+    if (lines.some(line => /(?:we (?:have )?issued your refund|your refund (?:has been|was) issued|refund has been issued|refund issued\s+(?:on|\$))/i.test(line))) return 'refund_issued';
+    if (lines.some(line => /(?:we (?:have )?received your return|your return (?:has been|was) received|received your return|item (?:has been|was) received|return processed|your return is complete|return received\s+(?:on|at)\b)/i.test(line))) return 'received';
+    if (lines.some(line => {
+      if (/(?:drop off your return by|please drop off|once you drop off|when you drop off|time you have dropped off|after you drop off)/i.test(line)) return false;
+      return /(?:your return (?:has been|was) dropped off|you (?:have )?dropped off your return|drop-?off complete|return (?:is|has been) in transit|on the way back|return (?:has been|was) shipped|shipped back|carrier (?:has )?received (?:your )?return|dropped off\s+(?:on|at)\b)/i.test(line);
+    })) return 'shipped';
+    if (lines.some(line => /(?:return request|accepted your return|drop off your return by|dropoff by|return code|refund will be issued|estimated refund|refund method|refund subtotal|return status link detected|^initiated$)/i.test(line))) return 'started';
     return 'unknown';
   }
 
@@ -214,7 +243,12 @@
       if (value === null || value === undefined || value === '') continue;
       if (wouldRegressReturn && ['returnStage', 'status', 'statusText'].includes(key)) continue;
       if (key === 'status' && incomingStatusRank < existingStatusRank) continue;
-      if (Array.isArray(value)) {
+      if (key === 'orderItems' && Array.isArray(value)) {
+        const normalizedItems = normalizeOrderItems(value);
+        if (incoming?.recordType === 'order' && incoming?.detailScanComplete && normalizedItems.length) merged[key] = normalizedItems;
+        else if (!Array.isArray(existing?.orderItems) || !existing.orderItems.length) merged[key] = normalizedItems;
+      }
+      else if (Array.isArray(value)) {
         if ((key === 'itemNames' && trustedIdentity.preserveNames) || (key === 'asins' && trustedIdentity.preserveAsins)) {
           merged[key] = mergeArray([], existing?.[key] || []);
         } else if (incoming?.recordType === 'return' && incoming?.authoritativeReturnCapture && ['itemNames', 'asins'].includes(key)) merged[key] = mergeArray([], value);
@@ -253,7 +287,8 @@
     for (const key of Object.keys(record || {}).sort()) {
       if (ignored.has(key)) continue;
       const value = record[key];
-      if (Array.isArray(value)) out[key] = [...value].map(v => String(v)).sort();
+      if (key === 'orderItems' && Array.isArray(value)) out[key] = normalizeOrderItems(value).slice().sort((a,b) => a.itemKey.localeCompare(b.itemKey));
+      else if (Array.isArray(value)) out[key] = [...value].map(v => String(v)).sort();
       else out[key] = value ?? null;
     }
     return JSON.stringify(out);

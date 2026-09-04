@@ -261,14 +261,28 @@
 
   function parseReturnMilestones(text) {
     const normalized = normalizeText(text);
+    const lines = normalized.split('\n').map(line => line.trim()).filter(Boolean);
 
-    // Static timeline labels are not evidence of completion. A completed credit requires an
-    // affirmative sentence that Amazon actually credited the refund.
-    const credited = /(?:your refund (?:has been|was) credited|we (?:have )?credited your refund|refund (?:has been|was) credited to|credited to your (?:original )?payment method on)/i.test(normalized);
-    const refundIssued = credited || /(?:we (?:have )?issued your refund|your refund (?:has been|was) issued|refund has been issued|refund issued\s+(?:on|\$))/i.test(normalized);
-    const received = refundIssued || /(?:we (?:have )?received your return|return (?:has been )?received|received your return|item received|return processed)/i.test(normalized);
-    const shipped = received || /(?:dropped off|drop-?off complete|return (?:is )?in transit|on the way back|return shipped|shipped back|carrier received)/i.test(normalized);
-    const started = shipped || /(?:return request|return initiated|initiated|accepted your return|return code|return summary|refund will be issued|estimated refund|refund method|refund subtotal)/i.test(normalized);
+    // A return-status page contains static labels for every future step. Completion therefore
+    // requires affirmative event language (or a DOM checkmark applied later), never the label alone.
+    const credited = lines.some(line => /(?:your refund (?:has been|was) credited|we (?:have )?credited your refund|refund (?:has been|was) credited to|credited to your (?:original )?payment method on)/i.test(line));
+    const refundIssuedDirect = lines.some(line => /(?:we (?:have )?issued your refund|your refund (?:has been|was) issued|refund has been issued|refund issued\s+(?:on|\$))/i.test(line));
+    const refundIssued = credited || refundIssuedDirect;
+
+    const receivedDirect = lines.some(line =>
+      /(?:we (?:have )?received your return|your return (?:has been|was) received|received your return|item (?:has been|was) received|return processed|your return is complete|return (?:has been|was) completed|return received\s+(?:on|at)\b)/i.test(line)
+    );
+    const received = refundIssued || receivedDirect;
+
+    const shippedDirect = lines.some(line => {
+      if (/(?:drop off your return by|drop-off your return by|please drop off|once you drop off|when you drop off|time you have dropped off|after you drop off|before you drop off)/i.test(line)) return false;
+      return /(?:your return (?:has been|was) dropped off|you (?:have )?dropped off your return|drop-?off complete|return (?:is|has been) in transit|on the way back|return (?:has been|was) shipped|shipped back|carrier (?:has )?received (?:your )?return|dropped off\s+(?:on|at)\b)/i.test(line);
+    });
+    const shipped = received || shippedDirect;
+
+    const started = shipped || lines.some(line =>
+      /(?:return request (?:is )?(?:confirmed|accepted)|return initiated|return started|accepted your return|drop off your return by|drop-off your return by|return code|return summary|refund will be issued|estimated refund|refund method|refund subtotal|^initiated$)/i.test(line)
+    );
 
     const stage = credited ? 'credited' : refundIssued ? 'refund_issued' : received ? 'received' : shipped ? 'shipped' : started ? 'started' : 'unknown';
     const expectedCreditDate = credited ? null : findExpectedCreditDate(normalized);
@@ -281,6 +295,62 @@
       refundIssued: { done: refundIssued, date: refundIssued ? findMilestoneDate(normalized, ['Refund issued']) : null },
       credited: { done: credited, date: credited ? findMilestoneDate(normalized, ['Refund credited', 'Credited']) : null }
     };
+  }
+
+  function extractCompletedReturnMilestonesFromDom(container) {
+    const done = { started: false, shipped: false, received: false, refundIssued: false, credited: false };
+    if (!container?.querySelectorAll) return done;
+    let checks = [];
+    try {
+      checks = Array.from(container.querySelectorAll('img[src*="milestone_checkmark" i], img[data-src*="milestone_checkmark" i], img[alt*="checkmark" i]'));
+    } catch (_) {}
+    const stageForLabel = line => {
+      const value = normalizeText(line).toLowerCase();
+      if (value === 'initiated' || value === 'return initiated' || value === 'return started') return 'started';
+      if (value === 'drop off' || value === 'dropped off' || value === 'return shipped') return 'shipped';
+      if (value === 'return received') return 'received';
+      if (value === 'refund issued') return 'refundIssued';
+      if (value === 'refund credited' || value === 'credited') return 'credited';
+      return null;
+    };
+    for (const check of checks) {
+      let current = check.parentElement || null;
+      for (let depth = 0; current && depth < 6; depth += 1, current = current.parentElement) {
+        const text = normalizeText(current.innerText || current.textContent || '');
+        if (!text || text.length > 700) continue;
+        const labels = Array.from(new Set(text.split('\n').map(stageForLabel).filter(Boolean)));
+        if (labels.length === 1) { done[labels[0]] = true; break; }
+        if (labels.length > 1) break;
+      }
+    }
+    // Later completed milestones imply the earlier physical steps.
+    if (done.credited) done.refundIssued = true;
+    if (done.refundIssued) done.received = true;
+    if (done.received) done.shipped = true;
+    if (done.shipped) done.started = true;
+    return done;
+  }
+
+  function applyDomReturnMilestones(record, container) {
+    if (!record || record.recordType !== 'return') return record;
+    const dom = extractCompletedReturnMilestonesFromDom(container);
+    if (!Object.values(dom).some(Boolean)) return record;
+    const milestones = record.returnMilestones || parseReturnMilestones(record.statusText || '');
+    for (const key of ['started', 'shipped', 'refundIssued', 'credited']) {
+      const domKey = key;
+      if (!dom[domKey]) continue;
+      milestones[key] = { ...(milestones[key] || {}), done: true };
+    }
+    if (dom.received) milestones.receivedByDom = true;
+    const stage = dom.credited ? 'credited' : dom.refundIssued ? 'refund_issued' : dom.received ? 'received' : dom.shipped ? 'shipped' : dom.started ? 'started' : milestones.stage || 'unknown';
+    const rank = { unknown:0, started:1, shipped:2, received:3, refund_issued:4, credited:5 };
+    if ((rank[stage] || 0) > (rank[milestones.stage] || 0)) milestones.stage = stage;
+    record.returnMilestones = milestones;
+    record.returnStage = milestones.stage;
+    if ((rank[record.returnStage] || 0) >= 4) record.status = 'refunded';
+    else if (record.returnStage === 'received') record.status = 'returned_pending_refund';
+    else if ((rank[record.returnStage] || 0) >= 1) record.status = 'return_in_progress';
+    return record;
   }
 
   function classifyStatus(text, recordType) {
@@ -309,21 +379,11 @@
 
     const stage = parseReturnMilestones(normalized).stage;
     const stagePatterns = {
-      credited: [
-        /(?:your refund (?:has been|was) credited|we (?:have )?credited your refund|refund (?:has been|was) credited to|credited to your (?:original )?payment method on)/i
-      ],
-      refund_issued: [
-        /(?:we (?:have )?issued your refund|your refund (?:has been|was) issued|refund has been issued|refund issued\s+(?:on|\$))/i
-      ],
-      received: [
-        /(?:we (?:have )?received your return|return (?:has been )?received|received your return|item received|return processed|your return is complete|return complete)/i
-      ],
-      shipped: [
-        /(?:dropped off|drop-?off complete|return (?:is )?in transit|on the way back|return shipped|shipped back|carrier received)/i
-      ],
-      started: [
-        /(?:return request|return initiated|return started|accepted your return|return code|return summary|refund will be issued|estimated refund)/i
-      ]
+      credited: [/(?:your refund (?:has been|was) credited|we (?:have )?credited your refund|refund (?:has been|was) credited to|credited to your (?:original )?payment method on)/i],
+      refund_issued: [/(?:we (?:have )?issued your refund|your refund (?:has been|was) issued|refund has been issued|refund issued\s+(?:on|\$))/i],
+      received: [/(?:we (?:have )?received your return|your return (?:has been|was) received|received your return|item (?:has been|was) received|return processed|your return is complete|return (?:has been|was) completed|return received\s+(?:on|at)\b)/i],
+      shipped: [/(?:your return (?:has been|was) dropped off|you (?:have )?dropped off your return|drop-?off complete|return (?:is|has been) in transit|on the way back|return (?:has been|was) shipped|shipped back|carrier (?:has )?received (?:your )?return|dropped off\s+(?:on|at)\b)/i],
+      started: [/(?:return request (?:is )?(?:confirmed|accepted)|return initiated|return started|accepted your return|drop off your return by|return code|return summary|refund will be issued|estimated refund)/i]
     };
 
     for (const pattern of stagePatterns[stage] || []) {
@@ -331,10 +391,8 @@
       if (line) return line.slice(0, 500);
     }
 
-    // Normal purchase/delivery rows still need useful order status text, but static return
-    // timeline labels such as a bare "Refund issued" are deliberately excluded here.
     for (const line of lines) {
-      if (/^(?:refund issued|refund credited|credited|initiated|dropped off|credit pending)$/i.test(line)) continue;
+      if (/^(?:refund issued|refund credited|return received|drop off|dropped off|credited|initiated|credit pending)$/i.test(line)) continue;
       if (/(?:delivered|arriving|shipped)/i.test(line) && !/(?:refund issued|refund credited)/i.test(line)) return line.slice(0, 500);
     }
     return null;
@@ -538,6 +596,103 @@
     }
     return asins.slice(0, 30);
   }
+
+  function productAnchorInfo(anchor) {
+    if (!anchor) return null;
+    const href = String(anchor.getAttribute?.('href') || anchor.href || '');
+    const asin = href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?#]|$)/i)?.[1]?.toUpperCase() || '';
+    if (!asin || excludedProductAnchor(anchor)) return null;
+    let itemName = normalizeText(anchor.innerText || anchor.textContent || anchor.getAttribute?.('aria-label') || anchor.getAttribute?.('title') || '');
+    if (!itemName || itemName.length < 3) {
+      const img = anchor.querySelector?.('img') || anchor.parentElement?.querySelector?.('img');
+      itemName = normalizeText(img?.getAttribute?.('alt') || img?.alt || '');
+    }
+    if (!itemName || itemName.length < 3 || itemName.length > 500) return null;
+    if (/buy it again|view order|order details|track package|return or replace|write a product review|invoice|amazon business card|prime business/i.test(itemName)) return null;
+    return { asin, itemName: itemName.slice(0, 400) };
+  }
+
+  function singleProductContainerForAnchor(anchor, asin) {
+    let current = anchor?.parentElement || anchor || null;
+    let best = current;
+    for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
+      const text = normalizeText(current.innerText || current.textContent || '');
+      if (text.length > 6500) break;
+      let links = [];
+      try { links = Array.from(current.querySelectorAll?.('a[href*="/dp/"], a[href*="/gp/product/"], a[href*="/product/"]') || []); } catch (_) {}
+      const asins = new Set(links.map(a => productAnchorInfo(a)?.asin).filter(Boolean));
+      if (!asins.size || (asins.size === 1 && asins.has(asin))) best = current;
+      if (asins.size > 1) break;
+    }
+    return best;
+  }
+
+  function extractDirectItemQuantity(text) {
+    const normalized = normalizeText(text);
+    const match = normalized.match(/(?:^|\n)\s*(?:Quantity|Qty)\s*[:x]?\s*(\d+)\s*(?:$|\n)/im);
+    if (!match) return null;
+    const value = Number(match[1]);
+    return Number.isInteger(value) && value > 0 ? value : null;
+  }
+
+  function extractDirectItemAmount(container, text) {
+    const labeled = findLabeledMoney(text, ['Item subtotal', 'Item price']);
+    if (labeled != null) return labeled;
+    if (!container?.querySelectorAll) return null;
+    const values = [];
+    for (const selector of ['.a-price .a-offscreen', '[class*="item-price" i]', '[data-testid*="item-price" i]']) {
+      let nodes = [];
+      try { nodes = Array.from(container.querySelectorAll(selector)); } catch (_) {}
+      for (const node of nodes) {
+        const value = parseMoney(node.innerText || node.textContent || '');
+        if (value != null && Number.isFinite(Number(value))) values.push(Number(value));
+      }
+    }
+    const unique = Array.from(new Set(values.map(value => value.toFixed(2))));
+    return unique.length === 1 ? Number(unique[0]) : null;
+  }
+
+  function extractDirectFulfillmentStatus(text) {
+    const lines = normalizeText(text).split('\n').map(line => line.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (/return|refund|drop off/i.test(line)) continue;
+      if (/^(?:Delivered|Arriving|Shipped|Out for delivery|Preparing for shipment|Not yet shipped|Cancelled|Canceled)\b/i.test(line)) return line.slice(0, 180);
+    }
+    return null;
+  }
+
+  function extractOrderLineItems(container) {
+    if (!container?.querySelectorAll) return [];
+    let anchors = [];
+    try { anchors = Array.from(container.querySelectorAll('a[href*="/dp/"], a[href*="/gp/product/"], a[href*="/product/"]')); } catch (_) {}
+    const byAsin = new Map();
+    for (const anchor of anchors) {
+      const info = productAnchorInfo(anchor);
+      if (!info) continue;
+      const itemContainer = singleProductContainerForAnchor(anchor, info.asin);
+      const text = normalizeText(itemContainer?.innerText || itemContainer?.textContent || '');
+      const candidate = {
+        itemKey: `asin:${info.asin}`,
+        asin: info.asin,
+        itemName: info.itemName,
+        quantity: extractDirectItemQuantity(text),
+        itemAmount: extractDirectItemAmount(itemContainer, text),
+        fulfillmentStatus: extractDirectFulfillmentStatus(text),
+        source: 'order-details-product-anchor'
+      };
+      const existing = byAsin.get(info.asin);
+      if (!existing) byAsin.set(info.asin, candidate);
+      else byAsin.set(info.asin, {
+        ...existing,
+        itemName: String(candidate.itemName || '').length > String(existing.itemName || '').length ? candidate.itemName : existing.itemName,
+        quantity: existing.quantity ?? candidate.quantity,
+        itemAmount: existing.itemAmount ?? candidate.itemAmount,
+        fulfillmentStatus: existing.fulfillmentStatus || candidate.fulfillmentStatus
+      });
+    }
+    return Array.from(byAsin.values()).slice(0, 60);
+  }
+
 
 
   function extractReturnItemEntries(container) {
@@ -1281,8 +1436,8 @@
   function strongReturnEvidence(text) {
     const t = normalizeText(text).toLowerCase();
     if (!t) return false;
-    if (/return or replace items?|start a return|eligible for return/.test(t) && !/(return (?:request|started|initiated|received|complete|in transit|shipped)|dropped off|refund (?:issued|credited|processed|pending)|check return.*refund status)/.test(t)) return false;
-    return /(return (?:request (?:confirmed|accepted)|started|initiated|received|complete|completed|in transit|shipped)|dropped off|drop-off complete|refund (?:issued|credited|processed|pending)|your refund|check return\s*(?:&|and)\s*refund status)/.test(t);
+    if (/return or replace items?|start a return|eligible for return/.test(t) && !/check return\s*(?:&|and)\s*refund status/.test(t)) return false;
+    return parseReturnMilestones(text).stage !== 'unknown' || /check return\s*(?:&|and)\s*refund status/.test(t);
   }
 
   function parseDocument(doc, url) {
@@ -1331,6 +1486,7 @@
       const asins = pageType === 'return' ? [] : extractAsins(container);
       if (domNames.length) record.itemNames = domNames;
       record.asins = asins;
+      if (pageType === 'return') applyDomReturnMilestones(record, container || doc?.body);
 
       if (historyPage && record.recordType === 'order' && !detailByOrder.get(orderId)) {
         const terminal = terminalCancelledHistoryEvidence(context, orderId);
@@ -1344,6 +1500,12 @@
       }
 
       if (detailPage && record.recordType === 'order') {
+        const orderItems = extractOrderLineItems(container || doc?.body);
+        if (orderItems.length) {
+          record.orderItems = orderItems;
+          record.itemNames = orderItems.map(item => item.itemName).filter(Boolean);
+          record.asins = orderItems.map(item => item.asin).filter(Boolean);
+        }
         record.detailScanComplete = isCompleteCanonicalDetail(record, url);
         record.detailScannedAt = record.detailScanComplete ? new Date().toISOString() : null;
         // Order Details' Refund Total is the canonical order-level refund figure. Keep it separate
@@ -1514,6 +1676,9 @@
     findOrderRefundTotal,
     findCardLast4,
     extractPaymentEvidenceText,
+    extractCompletedReturnMilestonesFromDom,
+    applyDomReturnMilestones,
+    extractOrderLineItems,
     extractReturnItemEntries,
     isCompleteCanonicalDetail,
     extractOrderIds,

@@ -417,3 +417,10 @@ Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is expli
 - v0.18.6 scopes Next detection to real pagination controls/numeric pagination routes. Final selected page + disabled/no actionable Next = year complete -> next older year.
 - Page fingerprint remains the only proof of a successful within-year advance.
 - Issue #23 remains open until a live lifetime scan crosses 2026 page 18 into 2025.
+
+
+## v0.18.7 implementation
+- Live ThermoMaven order `111-1790078-4741015` proved static return timeline labels/policy prose could falsely promote Dropped off / Return received. v0.18.7 moves milestone completion to affirmative evidence, with DOM checkmarks as structured supplemental evidence.
+- Crawl pacing is ~30% faster through shorter serial delays only; rate-limit and correctness gates are unchanged.
+- Canonical Order Details now stores structured purchased `orderItems`; UI joins return groups per purchased product and displays all purchased products, including non-returned ones.
+- Issue #25 tracks live acceptance. Issue #23 remains separate until year rollover is observed live.
