@@ -290,3 +290,12 @@ A user-testable development build may merge only after `npm test` and PR CI pass
 2. Breville `113-1426991-3716216` must show Initiated Aug 7, Dropped off Aug 31, Return received Sep 2 complete; Refund issued Sep 10 and Refund credited Sep 17 incomplete until Amazon checks them.
 3. Row/group label must be Return received, not Credited.
 4. Bank confirmation stays separate; bank-before-issued shows Bank/Amazon conflict / Needs Review.
+
+
+## v0.18.9 live acceptance
+1. Allow the updater to install v0.18.9 and run a fresh scan.
+2. Breville `113-1426991-3716216`: verify only Initiated, Dropped off, Return received are complete until Amazon actually checks Refund issued/credited.
+3. Washer `113-3568581-2749842`: verify each return group reflects its own current Amazon stage and future static/checkmark markup does not promote it.
+4. RAMPOW `111-1110034-5588263`: verify Refund issued can be complete while Refund credited remains pending.
+5. Confirm All orders/Returns/Needs review show only complete orders. Observe in-flight records under Processing and force an order failure to verify exact error text under Errors; Refresh should retry and clear the error on success.
+6. Exercise text search plus status/year/card filters and every sort mode.

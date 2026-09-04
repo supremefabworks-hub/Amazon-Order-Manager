@@ -211,3 +211,8 @@ v0.18.6 treats Amazon history pagination as a scoped control state, not generic 
 
 ## v0.18.8 Amazon lifecycle / bank separation
 Amazon return lifecycle is five explicit stages: Initiated -> Dropped off -> Return received -> Refund issued -> Refund credited. Amazon milestone checkmarks complete the leading timeline stages; future unchecked labels remain pending. Bank verification is independent and never promotes Amazon stage. A bank-confirmed credit before Amazon shows Refund issued is a review conflict.
+
+
+## v0.18.9 authoritative progress and complete-only ledger
+
+v0.18.9 removes checkmark-count inference from detached Amazon return HTML. DOM checkmarks must be structurally bound/non-hidden and cannot outrank affirmative Amazon lifecycle prose. The normal ledger now shows only fully processed orders; incomplete work is isolated in Processing and terminal order failures in Errors. Completed orders with real return-status links display authoritative return captures rather than provisional link records. Search now includes ASIN/card/status/order/product evidence, with status/year/card filters and multiple sort modes. Issue #29 tracks live acceptance.

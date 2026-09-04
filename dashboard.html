@@ -28,6 +28,8 @@
       <button class="view-button" data-view="all">All orders <span id="navAllCount">0</span></button>
       <button class="view-button" data-view="returns">Returns <span id="navReturnCount">0</span></button>
       <button class="view-button" data-view="needs_review">Needs review <span id="navReviewCount">0</span></button>
+      <button class="view-button" data-view="processing">Processing <span id="navProcessingCount">0</span></button>
+      <button class="view-button" data-view="errors">Errors <span id="navErrorCount">0</span></button>
     </section>
 
     <section class="panel scanner-row">
@@ -52,8 +54,31 @@
       </div>
     </section>
 
-    <section class="panel filters filters-one">
-      <input id="search" type="search" placeholder="Search item, order ID, status, or card">
+    <section class="panel filters ledger-filters">
+      <input id="search" type="search" placeholder="Search order ID, product, ASIN, status, or card">
+      <select id="statusFilter" aria-label="Filter by order or return status">
+        <option value="all">All statuses</option>
+        <option value="no_return">No return</option>
+        <option value="return_started">Return started</option>
+        <option value="dropped_off">Dropped off</option>
+        <option value="return_received">Return received</option>
+        <option value="refund_issued">Refund issued</option>
+        <option value="refund_credited">Refund credited</option>
+        <option value="needs_review">Needs review</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+      <select id="yearFilter" aria-label="Filter by order year"><option value="all">All years</option></select>
+      <select id="cardFilter" aria-label="Filter by payment card"><option value="all">All cards</option></select>
+      <select id="sortOrder" aria-label="Sort orders">
+        <option value="newest">Newest first</option>
+        <option value="oldest">Oldest first</option>
+        <option value="order_high">Order total: high to low</option>
+        <option value="order_low">Order total: low to high</option>
+        <option value="refund_high">Refund: high to low</option>
+        <option value="refund_low">Refund: low to high</option>
+        <option value="status">Status</option>
+        <option value="order_id">Order ID</option>
+      </select>
     </section>
 
     <section class="ledger-card-panel">

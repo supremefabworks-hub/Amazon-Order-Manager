@@ -114,19 +114,20 @@
     const progress = storage.returnProgress(record);
     const item = record.itemNames?.[0] || `Return for order ${record.orderId}`;
     const amount = Number.isFinite(Number(record.refundAmount)) ? `$${Number(record.refundAmount).toFixed(2)}` : '';
-    const expectedCredit = !progress.credited ? (record.expectedCreditDate || record?.returnMilestones?.expectedCreditDate || '') : '';
+    const expectedCredit = !progress.amazonCredited ? (record.expectedCreditDate || record?.returnMilestones?.expectedCreditDate || '') : '';
     const orderDetailsUrl = record.orderDetailsUrl && /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html|order-details)/i.test(record.orderDetailsUrl) ? record.orderDetailsUrl : '';
     const steps = [
       ['started', 'Initiated', progress.started, milestoneDate(record, 'started')],
-      ['shipped', 'Dropped off', progress.shippedOrReceived, milestoneDate(record, 'shipped')],
+      ['shipped', 'Dropped off', progress.shipped, milestoneDate(record, 'shipped')],
+      ['received', 'Return received', progress.received, milestoneDate(record, 'received')],
       ['refundIssued', 'Refund issued', progress.refundIssued, milestoneDate(record, 'refundIssued')],
-      ['credited', progress.credited ? 'Credited' : (expectedCredit ? `Expected by ${expectedCredit}` : 'Credit pending'), progress.credited, progress.credited ? milestoneDate(record, 'credited') : '']
+      ['credited', progress.amazonCredited ? 'Refund credited' : (expectedCredit ? `Expected ${expectedCredit}` : 'Refund credited'), progress.amazonCredited, progress.amazonCredited ? milestoneDate(record, 'credited') : '']
     ];
     const esc = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
     return `<section class="return-box">
       <div class="head"><div><b>${esc(inlineStageLabel(progress.stage))}</b><span>${esc(item)}</span></div>${amount ? `<strong>${esc(amount)}</strong>` : ''}</div>
       <div class="track"><div class="rail"><i style="width:${progress.percent}%"></i></div>
-        ${steps.map((step, index) => `<div class="step ${step[2] ? 'done' : ''}"><em>${step[2] ? '✓' : ''}</em><small>${esc(step[3] || '')}</small><span>${esc(step[1])}</span></div>`).join('')}
+        ${steps.map(step => `<div class="step ${step[2] ? 'done' : ''}"><em>${step[2] ? '✓' : ''}</em><small>${esc(step[3] || '')}</small><span>${esc(step[1])}</span></div>`).join('')}
       </div>
       ${orderDetailsUrl ? `<a href="${esc(orderDetailsUrl)}" target="_blank" rel="noopener">Open order details</a>` : ''}
     </section>`;
@@ -161,7 +162,7 @@
       const root = host.shadowRoot;
       if (!root) continue;
       root.innerHTML = `<style>
-        :host{display:block;font-family:Arial,Helvetica,sans-serif;color:#0f1111}.wrap{display:grid;gap:8px}.return-box{border:1px solid #d5d9d9;border-radius:8px;background:#fff;padding:12px 14px}.head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.head b{display:block;color:#067d62;font-size:14px}.head span{display:block;margin-top:3px;font-size:12px;color:#565959;max-width:620px}.head strong{color:#067d62;font-size:14px;white-space:nowrap}.track{position:relative;display:grid;grid-template-columns:repeat(4,1fr);margin-top:14px;gap:4px}.rail{position:absolute;left:8%;right:8%;top:19px;height:4px;background:#d5d9d9;border-radius:8px;overflow:hidden}.rail i{display:block;height:100%;background:#00a8a8;border-radius:8px}.step{position:relative;text-align:center;z-index:1;color:#68717a}.step em{display:flex;width:18px;height:18px;margin:10px auto 4px;border-radius:50%;border:2px solid #879596;background:#fff;align-items:center;justify-content:center;font-style:normal;font-size:11px;color:#fff}.step.done em{background:#00a8a8;border-color:#00a8a8}.step small{display:block;min-height:14px;font-size:9px;color:#565959}.step span{display:block;font-size:10px}.step.done span{color:#007185;font-weight:700}a{display:inline-block;margin-top:10px;color:#007185;font-size:11px;text-decoration:none}a:hover{text-decoration:underline}</style>
+        :host{display:block;font-family:Arial,Helvetica,sans-serif;color:#0f1111}.wrap{display:grid;gap:8px}.return-box{border:1px solid #d5d9d9;border-radius:8px;background:#fff;padding:12px 14px}.head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.head b{display:block;color:#067d62;font-size:14px}.head span{display:block;margin-top:3px;font-size:12px;color:#565959;max-width:620px}.head strong{color:#067d62;font-size:14px;white-space:nowrap}.track{position:relative;display:grid;grid-template-columns:repeat(5,1fr);margin-top:14px;gap:4px}.rail{position:absolute;left:8%;right:8%;top:19px;height:4px;background:#d5d9d9;border-radius:8px;overflow:hidden}.rail i{display:block;height:100%;background:#00a8a8;border-radius:8px}.step{position:relative;text-align:center;z-index:1;color:#68717a}.step em{display:flex;width:18px;height:18px;margin:10px auto 4px;border-radius:50%;border:2px solid #879596;background:#fff;align-items:center;justify-content:center;font-style:normal;font-size:11px;color:#fff}.step.done em{background:#00a8a8;border-color:#00a8a8}.step small{display:block;min-height:14px;font-size:9px;color:#565959}.step span{display:block;font-size:10px}.step.done span{color:#007185;font-weight:700}a{display:inline-block;margin-top:10px;color:#007185;font-size:11px;text-decoration:none}a:hover{text-decoration:underline}</style>
         <div class="wrap">${records.map(inlineReturnCard).join('')}</div>`;
     }
   }
@@ -336,7 +337,8 @@
           let save = null;
           if (parsed.records?.length) save = await storage.upsertRecords(parsed.records);
           const returnRefreshes = [];
-          for (const link of (parsed.returnLinks || []).filter(link => link?.orderId === orderId && link?.url)) {
+          const validReturnLinks = (parsed.returnLinks || []).filter(link => link?.orderId === orderId && link?.url && /\/spr\/returns\/prep/i.test(String(link.url)));
+          for (const link of validReturnLinks) {
             const returnUrl = new URL(link.url, finalUrl);
             if (!/(^|\.)amazon\.com$/i.test(returnUrl.hostname) || !/\/spr\/returns\/prep/i.test(returnUrl.pathname)) continue;
             const returnResponse = await fetch(returnUrl.toString(), { credentials: 'include', cache: 'no-store', redirect: 'follow' });
@@ -358,7 +360,21 @@
             const returnSave = await storage.upsertRecords(returnRecords);
             returnRefreshes.push({ url: returnFinalUrl, records: returnRecords.length, save: returnSave });
           }
-          return { ok: true, ...parsed, save, scannedUrl: finalUrl, fetchedOrderDetails: true, returnRefreshes };
+          const expectedReturns = validReturnLinks.length;
+          const authoritativeReturns = returnRefreshes.length;
+          if (authoritativeReturns !== expectedReturns) return { ok: false, error: `Only ${authoritativeReturns}/${expectedReturns} return-status pages completed for ${orderId}.` };
+          await storage.updateRecord(`order:${orderId}`, {
+            orderDataComplete: true,
+            processingState: 'complete',
+            processingError: null,
+            processingErrorAt: null,
+            processingLastIssue: null,
+            returnStatusExpectedCount: expectedReturns,
+            returnStatusAuthoritativeCount: authoritativeReturns,
+            returnStatusComplete: true,
+            orderDataCompletedAt: new Date().toISOString()
+          });
+          return { ok: true, ...parsed, save, scannedUrl: finalUrl, fetchedOrderDetails: true, returnRefreshes, orderDataComplete: true, returnStatusExpectedCount: expectedReturns, returnStatusAuthoritativeCount: authoritativeReturns };
         } catch (error) {
           return { ok: false, error: error?.message || String(error) };
         }

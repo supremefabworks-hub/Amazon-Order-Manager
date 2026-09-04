@@ -745,12 +745,42 @@ assert(v0187DomDone.shipped === false && v0187DomDone.received === false && v018
 
 // v0.18.8 Breville: three checkmarks mean Initiated, Dropped off, Return received only.
 const v0188BrevilleText = `Aug 7\nInitiated\nAug 31\nDropped off\nSep 2\nReturn received\nSep 10\nRefund issued\nSep 17\nRefund credited\nYour return was received`;
-const v0188Timeline = { innerText:v0188BrevilleText, textContent:v0188BrevilleText, querySelectorAll(selector){ return selector.includes('milestone_checkmark') ? [{},{},{}] : []; } };
+const v0188Rows = ['Initiated','Dropped off','Return received'].map(label => ({ innerText:label, textContent:label, parentElement:null, getAttribute(){ return null; } }));
+const v0188Checks = v0188Rows.map(row => ({ parentElement:row, getAttribute(){ return null; } }));
+const v0188Timeline = { innerText:v0188BrevilleText, textContent:v0188BrevilleText, querySelectorAll(selector){ return selector.includes('milestone_checkmark') ? v0188Checks : []; }, getAttribute(){ return null; }, parentElement:null };
 const v0188Dom = p.extractCompletedReturnMilestonesFromDom(v0188Timeline);
-assert(v0188Dom.started && v0188Dom.shipped && v0188Dom.received, 'three milestone checkmarks must complete first three Amazon stages');
+assert(v0188Dom.started && v0188Dom.shipped && v0188Dom.received, 'three structurally bound milestone checkmarks must complete first three Amazon stages');
 assert(!v0188Dom.refundIssued && !v0188Dom.credited, 'future unchecked Refund issued/credited labels must stay incomplete');
 const v0188Parsed = p.parseTextRecord(v0188BrevilleText, '113-1426991-3716216', {pageType:'return', url:'https://www.amazon.com/spr/returns/prep?orderId=113-1426991-3716216'});
 assert(v0188Parsed.returnStage === 'received', 'Breville affirmative received evidence must classify as received');
 assert(v0188Parsed.returnMilestones.received.done === true, 'received milestone must be explicit');
 assert(v0188Parsed.returnMilestones.refundIssued.done === false && v0188Parsed.returnMilestones.credited.done === false, 'future refund labels must not complete');
 console.log('v0.18.8 Breville lifecycle regressions passed');
+
+
+// v0.18.9: detached Amazon HTML may retain checkmark markup for future stages. Affirmative
+// lifecycle prose caps DOM checkmark evidence so future stages cannot be completed by element count.
+function v0189Check(label, hidden=false) {
+  const parent = {
+    innerText: label, textContent: label, parentElement: null,
+    hidden, className: hidden ? 'aok-hidden' : '',
+    getAttribute(name) { if (name === 'class') return this.className; if (name === 'aria-hidden') return hidden ? 'true' : null; return null; }
+  };
+  return { parentElement: parent, hidden:false, className:'', getAttribute(){ return null; } };
+}
+function v0189TimelineContainer(text, labels, hiddenIndexes=[]) {
+  const checks = labels.map((label,index) => v0189Check(label, hiddenIndexes.includes(index)));
+  return { innerText:text, textContent:text, querySelectorAll(selector){ return selector.includes('milestone_checkmark') ? checks : []; }, getAttribute(){ return null; }, parentElement:null };
+}
+const v0189Breville = { recordType:'return', returnStage:'received', status:'returned_pending_refund', statusText:'Your return was received', returnMilestones:p.parseReturnMilestones('Your return was received') };
+p.applyDomReturnMilestones(v0189Breville, v0189TimelineContainer('Your return was received\nAug 7\nInitiated\nAug 31\nDropped off\nSep 2\nReturn received\nSep 10\nRefund issued\nSep 17\nRefund credited', ['Initiated','Dropped off','Return received','Refund issued','Refund credited']));
+assert(v0189Breville.returnStage === 'received', 'Breville affirmative received prose must cap future checkmark markup at Return received');
+assert(v0189Breville.returnMilestones.refundIssued.done === false && v0189Breville.returnMilestones.credited.done === false, 'future refund stages must remain incomplete after received');
+const v0189Washer = { recordType:'return', returnStage:'started', status:'return_in_progress', statusText:'Your return request is confirmed', returnMilestones:p.parseReturnMilestones('Your return request is confirmed') };
+p.applyDomReturnMilestones(v0189Washer, v0189TimelineContainer('Your return request is confirmed\nInitiated\nDropped off\nReturn received\nRefund issued\nRefund credited', ['Initiated','Dropped off','Return received','Refund issued','Refund credited']));
+assert(v0189Washer.returnStage === 'started', 'confirmed return request must not be promoted by future checkmark markup');
+const v0189Rampow = { recordType:'return', returnStage:'refund_issued', status:'refunded', statusText:'$7.53 refund issued on Aug 18, 2026.', returnMilestones:p.parseReturnMilestones('$7.53 refund issued on Aug 18, 2026.') };
+p.applyDomReturnMilestones(v0189Rampow, v0189TimelineContainer('$7.53 refund issued on Aug 18, 2026.\nInitiated\nDropped off\nReturn received\nRefund issued\nRefund credited', ['Initiated','Dropped off','Return received','Refund issued','Refund credited']));
+assert(v0189Rampow.returnStage === 'refund_issued' && v0189Rampow.returnMilestones.credited.done === false, 'issued refund must not become credited from future checkmark markup');
+assert(p.extractCompletedReturnMilestonesFromDom(v0189TimelineContainer('Initiated\nDropped off', ['Initiated','Dropped off'], [1])).shipped === false, 'explicitly hidden milestone checkmarks must not count');
+console.log('v0.18.9 authoritative milestone regressions passed');

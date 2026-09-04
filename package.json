@@ -1,6 +1,6 @@
 {
   "name": "amazon-order-manager",
-  "version": "0.18.8",
+  "version": "0.18.9",
   "private": true,
   "description": "Amazon / Amazon Business order, per-product status, independent Amazon return lifecycle, bank verification, refund, credit, cancellation, year-rollover, and verified development-update tracking Chrome extension",
   "scripts": {

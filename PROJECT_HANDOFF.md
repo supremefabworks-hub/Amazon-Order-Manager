@@ -430,3 +430,11 @@ Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is expli
 - Breville `113-1426991-3716216`: Amazon shows completed Initiated Aug 7, Dropped off Aug 31, Return received Sep 2; Refund issued Sep 10 and Refund credited Sep 17 are future unchecked labels.
 - v0.18.8 adds explicit Return received UI/storage, ordered-prefix milestone checkmark interpretation, and strict separation of Amazon lifecycle vs bank verification.
 - Bank-before-refund-issued becomes Needs Review instead of Credited. Issue #27 tracks live acceptance.
+
+
+## v0.18.9 implementation
+- Live v0.18.8 still over-completed Breville/washer timelines because detached HTML can retain future checkmark markup. v0.18.9 removes count-based checkmark inference and caps DOM evidence at affirmative lifecycle prose.
+- A managed order is dashboard-ready only after canonical Order Details plus every discovered return-status child complete successfully.
+- Main ledger views are complete-only; Processing and Errors isolate partial/failed work. Successful retries clear the error and move the order into normal views.
+- Completed orders prefer authoritative return captures when real return-status links exist.
+- Added search across ASIN/card/order/product/status plus status/year/card filters and sort modes. Issue #29 tracks live acceptance.

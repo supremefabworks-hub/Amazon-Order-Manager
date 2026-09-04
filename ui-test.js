@@ -68,3 +68,15 @@ assert(dashboardV0188.includes("statusLabel = 'Amazon credited'"), 'bank match m
 assert(storageV0188.includes('function hasAmazonBankConflict'), 'storage must separate Amazon/bank states');
 assert(cssV0188.includes('repeat(5, minmax(0, 1fr))'), 'lifecycle must use five Amazon stages');
 console.log('v0.18.8 Amazon/bank separation UI regressions passed');
+
+
+const dashboardHtmlV0189 = fs.readFileSync(__dirname + '/dashboard.html', 'utf8');
+const dashboardSourceV0189 = fs.readFileSync(__dirname + '/dashboard.js', 'utf8');
+assert(dashboardHtmlV0189.includes('data-view="processing"') && dashboardHtmlV0189.includes('data-view="errors"'), 'dashboard must separate Processing and Errors from completed orders');
+for (const id of ['statusFilter','yearFilter','cardFilter','sortOrder']) assert(dashboardHtmlV0189.includes(`id="${id}"`), `dashboard must render ${id}`);
+assert(dashboardSourceV0189.includes("currentView === 'all' && !row.dataComplete"), 'All orders must hide incomplete records');
+assert(dashboardSourceV0189.includes('authoritativeReturnCapture === true'), 'completed orders with return links must prefer authoritative return records');
+assert(dashboardSourceV0189.includes("currentView === 'errors' && !row.processingError"), 'Errors view must be driven by persisted processing errors');
+assert(dashboardSourceV0189.includes("mode === 'order_high'") && dashboardSourceV0189.includes("mode === 'refund_low'"), 'sort controls must support monetary ordering');
+assert(dashboardSourceV0189.includes('...(row.asins || [])'), 'text search must include ASIN evidence');
+console.log('v0.18.9 complete-ledger query UI regressions passed');
