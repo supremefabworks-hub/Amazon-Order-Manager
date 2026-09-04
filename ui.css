@@ -315,3 +315,24 @@ html, body { max-width: 100%; overflow-x: hidden; }
 
 /* v0.18.3 status badges stay inside their fixed ledger column. */
 .line-status .badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; text-align: left; }
+
+
+/* v0.18.7 per-product order status */
+.order-product-stack { display:grid; gap:5px; min-width:0; }
+.order-product-row { min-width:0; padding:5px 6px; border:1px solid #e6e9ec; border-radius:7px; background:#fbfcfd; }
+.order-product-row.has-product-return { background:#fcfefe; border-color:#d9e9e9; }
+.order-product-head { display:flex; align-items:flex-start; justify-content:space-between; gap:7px; min-width:0; }
+.order-product-head > div { display:flex; align-items:flex-start; gap:5px; min-width:0; }
+.order-product-head strong { min-width:0; font-size:8.5px; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.order-product-index { flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; border-radius:50%; background:#eef1f4; font-size:7px; font-weight:900; }
+.product-state { flex:0 0 auto; padding:2px 5px; border-radius:999px; font-size:7px; font-weight:850; white-space:nowrap; }
+.product-not-returned { background:#eef3fa; color:#345b89; }
+.product-returned { background:#fff3d8; color:#765109; }
+.product-unmatched { background:#fff0d8; color:#7e5300; }
+.order-product-meta { margin:2px 0 0 20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.product-return-lifecycles { margin-top:3px; padding-left:20px; }
+.product-return-lifecycles .return-track-title { display:none; }
+.unmatched-product-return { border-color:#d8b163; background:#fffaf0; }
+@media (max-width: 1050px) {
+  .order-product-head strong { white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+}

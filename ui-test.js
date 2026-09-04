@@ -47,3 +47,10 @@ const parserSourceV0185 = fs.readFileSync(__dirname + '/parser.js', 'utf8');
 assert(parserSourceV0185.includes("pageType === 'return' ? [] : extractAsins(container)"), 'broad return-page product identity must stay disabled');
 assert(parserSourceV0185.includes('structuralHistoryContainerForOrder'), 'no-detail history cards must have structural scoping');
 assert(fs.readFileSync(__dirname + '/storage.js', 'utf8').includes('itemAsinEvidenceSource'), 'identity conflicts must require bound ASIN evidence');
+
+
+assert(fs.readFileSync(__dirname + '/dashboard.html', 'utf8').includes('item-model.js'), 'dashboard must load the pure per-product item model');
+assert(dashboard.includes('orderProductStatusMarkup'), 'dashboard must render purchased products independently inside each order');
+assert(dashboard.includes("'Not returned'"), 'non-returned purchased products must stay visible with Not returned state');
+assert(dashboard.includes('returnedProductCount'), 'order summary must expose how many purchased products were returned');
+assert(css.includes('v0.18.7 per-product order status'), 'per-product order rows must have responsive no-horizontal-scroll styling');

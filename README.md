@@ -2,7 +2,7 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.6 candidate for Issue #19.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.7 candidate for Issue #19.** GitHub is the source of truth and chat sessions are disposable.
 
 Two issues remain intentionally separate:
 
@@ -197,3 +197,10 @@ v0.18.5 fixes two live parser defects. Orders with no Detail action, especially 
 ## v0.18.6 end-of-year pagination boundary
 
 v0.18.6 treats Amazon history pagination as a scoped control state, not generic page text. A selected final page with disabled/no actionable Next now marks that year complete and queues the next older discovered year. Enabled Next or a concrete numeric N+1 pagination target still advances only after the visible Order-ID fingerprint changes. Generic unrelated `Next` text cannot keep a year alive.
+
+
+## v0.18.7 evidence-safe milestones, faster serial crawl, and per-product state
+
+- Return milestones now require affirmative completion evidence or an item-scoped Amazon timeline checkmark; future instructions, policy prose, and static labels do not advance lifecycle state.
+- Normal serial crawl idle/settle intervals are approximately 30% shorter. Concurrency, retry counts, rate-limit cooldowns, canonical Detail requirements, and Order-ID fingerprint gates are unchanged.
+- Canonical Order Details now persists structured `orderItems`. The dashboard remains one card per order but shows every purchased product beneath it, with product-scoped quantity/price/fulfillment fields only when directly proven. Return groups join to purchased products by strong ASIN or conservative long-title evidence; non-returned products remain visible as `Not returned`, and unmatched returned children stay visible for review.

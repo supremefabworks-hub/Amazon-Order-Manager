@@ -9,10 +9,10 @@ const DETAIL_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
 const RETURN_DETAIL_REFRESH_MS = 24 * 60 * 60 * 1000;
 const RETURN_STATUS_REFRESH_MS = 6 * 60 * 60 * 1000;
 const HISTORY_REFRESH_MS = 24 * 60 * 60 * 1000;
-const JOB_DELAY_MIN_MS = 250;
-const JOB_DELAY_MAX_MS = 650;
-const LOAD_SETTLE_MIN_MS = 650;
-const LOAD_SETTLE_MAX_MS = 1300;
+const JOB_DELAY_MIN_MS = 175;
+const JOB_DELAY_MAX_MS = 455;
+const LOAD_SETTLE_MIN_MS = 450;
+const LOAD_SETTLE_MAX_MS = 900;
 const BURST_MIN_JOBS = 40;
 const BURST_MAX_JOBS = 70;
 const COOLDOWN_MIN_MS = 10000;
@@ -706,7 +706,7 @@ function waitForTabComplete(tabId, expectedUrl) {
           return;
         }
       } catch (_) {}
-      pollTimer = setTimeout(inspect, 220);
+      pollTimer = setTimeout(inspect, 155);
     }
 
     function onUpdated(updatedId, info, tab) {
@@ -764,7 +764,7 @@ async function waitForHistorySelectedYear(tabId, year, timeoutMs = 7000, beforeF
     const yearMatches = Number(state?.historySelectedYear) === target || Number(routeYear) === target;
     const contentMatches = !requireContentChange || !beforeFingerprint || (state?.fingerprint && state.fingerprint !== beforeFingerprint);
     if (yearMatches && contentMatches) return true;
-    await delay(randomBetween(350, 700));
+    await delay(randomBetween(245, 490));
   }
   return false;
 }
@@ -810,7 +810,7 @@ async function clickNextHistoryPage(tabId, currentUrl) {
   const started = Date.now();
   let lastUrl = currentUrl;
   while (Date.now() - started < 20000) {
-    await delay(randomBetween(550, 1150));
+    await delay(randomBetween(385, 805));
     try {
       const tab = await chrome.tabs.get(tabId);
       if (!tab?.url || !/^https:\/\/[^/]*amazon\.com\//i.test(tab.url)) continue;
@@ -825,7 +825,7 @@ async function clickNextHistoryPage(tabId, currentUrl) {
       let pageState = null;
       try { pageState = await chrome.tabs.sendMessage(tabId, { type: 'ARL_WORKER_PAGE_STATE' }); } catch (_) {}
       if (beforeState?.fingerprint && pageState?.fingerprint && beforeState.fingerprint !== pageState.fingerprint) {
-        await delay(randomBetween(700, 1500));
+        await delay(randomBetween(490, 1050));
         const inlineResult = await scanWorkerTab(tabId, { type: 'history', url: tab.url, dynamicContinuation: true });
         return { url: null, inlineResult };
       }
@@ -853,7 +853,7 @@ async function waitForHistoryOrderIdsChange(tabId, previousResult, expectedUrl, 
   const beforeKey = before.join('|');
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    await delay(randomBetween(450, 900));
+    await delay(randomBetween(315, 630));
     try {
       const tab = await chrome.tabs.get(tabId);
       if (expectedUrl && !urlMatchesNavigationTarget(tab?.url || '', expectedUrl)) continue;
@@ -1085,7 +1085,7 @@ async function runJob(job) {
     if (!job.url) throw new Error('Canonical Order Details URL is missing; crawler will not synthesize one.');
     const hostUrl = job.historyUrl || state.crawl.currentHistoryUrl || 'https://www.amazon.com/gp/your-account/order-history';
     const tabId = await ensureFetchHostTab(hostUrl);
-    await delay(randomBetween(150, 350));
+    await delay(randomBetween(105, 245));
     let result;
     try {
       result = await chrome.tabs.sendMessage(tabId, {

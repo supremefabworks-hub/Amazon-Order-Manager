@@ -671,3 +671,64 @@ assert(v0186NextUrl && /pagination\/18\//.test(v0186NextUrl), 'page 17 must reso
 const v0186UnrelatedNext = v0186PagerElement({ text:'Next', tagName:'BUTTON', href:'', inPager:false });
 const v0186UnrelatedDoc = v0186PagerDoc(18, [v0186UnrelatedNext]);
 assert(p.hasNextPageControl(v0186UnrelatedDoc, v0186FinalUrl) === false, 'unrelated whole-page Next text/button must not masquerade as history pagination');
+
+
+// v0.18.7 live ThermoMaven: future instructions/static labels are not completed milestones.
+const v0187ThermoMaven = `
+Drop off your return by Sep 8
+Location: Any UPS dropoff
+We will issue your refund within 30 days from the time you have dropped off your return.
+Note: Once issued, refunds typically become available in your account within 7 days.
+Aug 31
+Initiated
+Drop off
+Return received
+Refund issued
+Refund credited
+`;
+const v0187Thermo = p.parseTextRecord(v0187ThermoMaven, '111-1790078-4741015', { pageType: 'return', url: 'https://www.amazon.com/spr/returns/prep?orderId=111-1790078-4741015&rmaId=RMA-THERMO' });
+assert(v0187Thermo.returnStage === 'started', 'future dropoff instructions/static labels must leave ThermoMaven at Initiated');
+assert(v0187Thermo.returnMilestones.shipped.done === false, 'policy phrase about time you have dropped off must not complete Dropped off');
+assert(v0187Thermo.returnMilestones.refundIssued.done === false, 'bare Refund issued timeline label must not complete refund issued');
+assert(v0187Thermo.returnMilestones.credited.done === false, 'bare Refund credited timeline label must not complete credit');
+const v0187ActualDropoff = p.parseTextRecord('Your return was dropped off and is on the way back to Amazon.', '111-1790078-4741015', { pageType: 'return' });
+assert(v0187ActualDropoff.returnStage === 'shipped', 'affirmative completed dropoff language must still complete shipped stage');
+
+function v0187ProductAnchor(asin, title) {
+  return {
+    href: `https://www.amazon.com/dp/${asin}`,
+    innerText: title, textContent: title, parentElement: null,
+    getAttribute(name) { if (name === 'href') return `/dp/${asin}`; if (name === 'title') return title; return null; },
+    closest() { return null; }, querySelector() { return null; }
+  };
+}
+function v0187ItemNode(text, anchor) {
+  const node = {
+    innerText: text, textContent: text, parentElement: null,
+    querySelectorAll(selector) {
+      if (selector.includes('a[href*="/dp/"]')) return [anchor];
+      if (selector === '.a-price .a-offscreen' || selector.includes('item-price')) return [];
+      return [];
+    },
+    querySelector() { return null; }
+  };
+  anchor.parentElement = node;
+  return node;
+}
+const v0187Anchors = Array.from({length:6}, (_,i) => v0187ProductAnchor(`B00000010${i}`, `Purchased Product ${i + 1} Long Descriptive Title`));
+const v0187Nodes = v0187Anchors.map((anchor,i) => v0187ItemNode(`Purchased Product ${i + 1} Long Descriptive Title\nQuantity: ${i === 0 ? 2 : 1}\n${i === 1 ? 'Item price $19.99\n' : ''}Delivered Sep ${i + 1}`, anchor));
+const v0187OrderBody = {
+  innerText: v0187Nodes.map(node => node.innerText).join('\n'), textContent: '', parentElement:null,
+  querySelectorAll(selector) {
+    if (selector.includes('a[href*="/dp/"]')) return v0187Anchors;
+    return [];
+  }
+};
+for (const node of v0187Nodes) node.parentElement = v0187OrderBody;
+const v0187LineItems = p.extractOrderLineItems(v0187OrderBody);
+assert(v0187LineItems.length === 6, 'canonical Order Details must capture all six purchased products');
+assert(v0187LineItems[0].quantity === 2, 'explicit quantity must be captured');
+assert(v0187LineItems[1].itemAmount === 19.99, 'direct labeled item price may be captured');
+assert(v0187LineItems[2].itemAmount == null, 'item price must remain unknown when not directly proven');
+assert(v0187LineItems.every(item => item.fulfillmentStatus && item.fulfillmentStatus.startsWith('Delivered')), 'per-product fulfillment status should remain item scoped');
+console.log('v0.18.7 evidence and multi-product parser regressions passed');

@@ -36,6 +36,7 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
 
   const detailed = {
     ...index, itemNames: ['Example Part'], purchaseAmount: 123.45, cardLast4: '3172',
+    orderItems: [{ itemKey:'asin:B000000777', asin:'B000000777', itemName:'Example Part', quantity:2, itemAmount:null, fulfillmentStatus:'Delivered Sep 1', source:'order-details-product-anchor' }],
     detailScanComplete: true, detailScannedAt: new Date().toISOString()
   };
   const result = await s.upsertRecords([detailed]);
@@ -45,6 +46,8 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   assert(summary.detailedOrders === 1, 'detail upgrade should count as detailed');
   assert(ledger[0].itemNames.includes('Example Part'), 'detail item should merge into order');
   assert(ledger[0].purchaseAmount === 123.45, 'detail total should merge into order');
+  assert(Array.isArray(ledger[0].orderItems) && ledger[0].orderItems.length === 1, 'structured purchased items must survive storage merge as objects');
+  assert(ledger[0].orderItems[0].quantity === 2 && ledger[0].orderItems[0].itemAmount == null, 'known quantity and unknown item money must remain distinct');
 
   const retBase = {
     recordId: 'return:114-4444444-5555555:example-part', recordType: 'return', orderId: '114-4444444-5555555',

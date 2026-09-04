@@ -123,3 +123,7 @@ Treat a scoped Order History card as terminal-complete without a Detail URL only
 
 ### v0.18.6 durable addition
 Amazon Order History year rollover is determined by scoped pager state. Disabled/no actionable Next on the selected final page ends the year; unrelated `Next` page text is ignored. Within-year progress still requires a changed visible Order-ID fingerprint. Issue #23 tracks live rollover acceptance.
+
+
+### v0.18.7 durable addition
+Return milestone completion is evidence-safe: static timeline labels, future instructions, and policy/hypothetical prose never complete a milestone. Canonical Order Details persists structured purchased `orderItems`; the dashboard stays one order card with per-product status/return lifecycles. Normal crawl pacing is ~30% faster by shorter serial waits only, with concurrency/rate-limit/fingerprint/canonical-detail safeguards unchanged. Issue #25 tracks live acceptance.

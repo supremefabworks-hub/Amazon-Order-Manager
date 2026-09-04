@@ -110,3 +110,10 @@ assert(sandbox.historyPageChanged(
 ) === false, 'URL change without visible Order-ID fingerprint must not count as pagination progress');
 assert(typeof sandbox.syntheticDetailUrl === 'undefined', 'v0.17 must not expose a synthetic Order Details URL fallback');
 console.log('v0.17 background regressions passed');
+
+
+const backgroundSourceV0187 = fs.readFileSync(__dirname + '/background.js', 'utf8');
+assert(backgroundSourceV0187.includes('const JOB_DELAY_MIN_MS = 175;') && backgroundSourceV0187.includes('const JOB_DELAY_MAX_MS = 455;'), 'v0.18.7 normal inter-job pacing should be about 30% faster');
+assert(backgroundSourceV0187.includes('const LOAD_SETTLE_MIN_MS = 450;') && backgroundSourceV0187.includes('const LOAD_SETTLE_MAX_MS = 900;'), 'v0.18.7 page settle pacing should be about 30% faster');
+assert(backgroundSourceV0187.includes('RATE_LIMIT_COOLDOWN_MIN_MS = 10 * 60 * 1000') && backgroundSourceV0187.includes('RATE_LIMIT_COOLDOWN_MAX_MS = 20 * 60 * 1000'), 'rate-limit cooldown safety must remain unchanged');
+console.log('v0.18.7 pacing regression passed');
