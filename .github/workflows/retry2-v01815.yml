@@ -1,0 +1,41 @@
+name: Retry v0.18.15 newest-session UI gate
+
+on:
+  push:
+    branches: [v01815-newest-session-refresh]
+    paths:
+      - '.github/workflows/retry2-v01815.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v01815-newest-session-refresh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply v0.18.15 newest-session behavior
+        run: python3 tools/apply_v01815.py
+      - name: Update superseded in-flight regressions
+        run: python3 tools/patch_v01815_tests.py
+      - name: Update scanner wording regression
+        run: python3 tools/patch_v01815_ui_test.py
+      - name: Validate candidate
+        run: |
+          node --check background.js
+          node --check dashboard.js
+          node --check popup.js
+          npm test
+      - name: Commit durable implementation and remove temporary machinery
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f tools/apply_v01815.py tools/patch_v01815_tests.py tools/patch_v01815_ui_test.py .github/workflows/apply-v01815.yml .github/workflows/retry-v01815.yml .github/workflows/retry2-v01815.yml
+          git add -A
+          git commit -m 'Implement v0.18.15 newest-first scan sessions [v01815-generated]'
+          git push origin HEAD:v01815-newest-session-refresh
