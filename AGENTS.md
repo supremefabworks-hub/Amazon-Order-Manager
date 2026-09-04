@@ -22,6 +22,7 @@ Do not ask the user to repeat project history already captured in GitHub.
 - Never infer a return merely from availability of `Return or replace items`.
 - Never infer a payment-card last four from arbitrary four-digit text.
 - Never mark `Refund issued` or `Bank credited` without affirmative evidence.
+- Never derive a completed workflow/lifecycle state from the mere presence, count, or ordering of templated DOM elements in live or detached HTML. Completion evidence must be structurally bound to the exact entity and stage, must not be hidden/disabled/future/instructional evidence, and must not outrank stronger affirmative evidence from the canonical source. When evidence conflicts, preserve the highest stage that is actually proven and flag the record for review rather than promoting it.
 - Keep one canonical order object per Order ID and item-level return records underneath it.
 - Preserve strict year -> page -> all details -> next page -> next year crawl semantics.
 - Treat repeated Order-ID fingerprints as failed pagination, not new progress.
