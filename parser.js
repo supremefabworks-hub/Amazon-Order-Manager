@@ -946,7 +946,7 @@
 
     // Amazon Business on the recorded account uses a hash-routed pager. Queue its exact next
     // numbered route first; query offsets are only compatibility fallbacks for other Amazon UIs.
-    if (isOrderHistoryPage(doc, baseUrl) && hasNextPageControl(doc)) {
+    if (isOrderHistoryPage(doc, baseUrl) && hasNextPageControl(doc, baseUrl)) {
       add(buildHistoryRouteUrl(baseUrl, selectedYear, currentPage + 1));
     }
 
@@ -1071,7 +1071,7 @@
     if (selectedPage != null) {
       const exact = numeric.find(x => x.n === selectedPage + 1);
       if (exact) return exact.url;
-      if (hasNextPageControl(doc)) {
+      if (hasNextPageControl(doc, baseUrl)) {
         const year = route.year || displayedHistoryYear(doc, baseUrl);
         const synthetic = buildHistoryRouteUrl(baseUrl, year, selectedPage + 1);
         if (synthetic) return synthetic;
@@ -1127,32 +1127,109 @@
     for (const a of Array.from(doc.querySelectorAll('a[href]'))) {
       const text = normalizeText(a.innerText || a.textContent || a.getAttribute?.('aria-label') || a.getAttribute?.('title') || '').toLowerCase();
       if (!/(^|\b)next(?:\s+page)?(?:\b|\s*[→›»])/.test(text)) continue;
-      if (a.closest?.('.a-disabled') || a.getAttribute?.('aria-disabled') === 'true') continue;
+      if (!paginationControlContext(a)) continue;
+      if (isDisabledPaginationControl(a)) continue;
       const absolute = absoluteAmazonUrl(a.getAttribute('href') || a.href || '', baseUrl);
       if (absolute) return absolute;
     }
     return null;
   }
 
-  function hasNextPageControl(doc) {
+  function isDisabledPaginationControl(el) {
+    if (!el) return true;
+    if (el.disabled || String(el.getAttribute?.('aria-disabled') || '').toLowerCase() === 'true') return true;
+    const className = typeof el.className === 'string' ? el.className : String(el.getAttribute?.('class') || '');
+    if (/(?:^|\s)(?:a-disabled|s-pagination-disabled|disabled)(?:\s|$)/i.test(className)) return true;
+    try {
+      if (el.closest?.('.a-disabled, .s-pagination-disabled, [aria-disabled="true"]')) return true;
+    } catch (_) {}
+    return false;
+  }
+
+  function paginationControlContext(el) {
+    if (!el) return false;
+    const href = String(el.getAttribute?.('href') || el.href || el.getAttribute?.('data-href') || el.getAttribute?.('data-url') || '');
+    if (/#(?:time\/20\d{2}\/)?pagination\/(?:\d+|next|previous)\/?/i.test(href)) return true;
+    if (/[?&](?:startIndex|page(?:Number|No|Num)?)=\d+/i.test(href)) return true;
+    try {
+      return Boolean(el.closest?.('ul.a-pagination, .a-pagination, nav[aria-label*="pagination" i], [role="navigation"][aria-label*="pagination" i], [data-testid*="pagination" i]'));
+    } catch (_) { return false; }
+  }
+
+  function selectedPaginationPage(doc) {
+    if (!doc?.querySelector) return null;
+    for (const selector of ['.a-pagination li.a-selected', '.a-pagination [aria-current="page"]', '[aria-current="page"]', '.s-pagination-selected']) {
+      try {
+        const el = doc.querySelector(selector);
+        const n = Number(normalizeText(el?.innerText || el?.textContent || ''));
+        if (Number.isFinite(n) && n >= 1) return n;
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  function paginationPageNumberFromControl(el) {
+    if (!el) return null;
+    const href = String(el.getAttribute?.('href') || el.href || el.getAttribute?.('data-href') || el.getAttribute?.('data-url') || '');
+    const hashMatch = href.match(/#(?:time\/20\d{2}\/)?pagination\/(\d+)\/?/i);
+    if (hashMatch) return Number(hashMatch[1]);
+    try {
+      const u = new URL(href, 'https://www.amazon.com/');
+      const startRaw = u.searchParams.get('startIndex');
+      if (startRaw != null && startRaw !== '') {
+        const start = Number(startRaw);
+        if (Number.isFinite(start) && start >= 0) return Math.floor(start / 10) + 1;
+      }
+      for (const key of ['page', 'pageNumber', 'pageNo', 'pageNum']) {
+        const value = Number(u.searchParams.get(key));
+        if (Number.isFinite(value) && value >= 1) return value;
+      }
+    } catch (_) {}
+    const textNumber = Number(normalizeText(el.innerText || el.textContent || ''));
+    return Number.isFinite(textNumber) && textNumber >= 1 ? textNumber : null;
+  }
+
+  function hasNextPageControl(doc, baseUrl = '') {
     if (!doc?.querySelectorAll) return false;
+    const routePage = historyRouteFromUrl(baseUrl).page;
+    const currentPage = Number.isFinite(Number(routePage)) ? Number(routePage) : selectedPaginationPage(doc);
+
+    // High-confidence enabled Next controls. Broad whole-page "Next" text is deliberately excluded.
     const selectors = [
-      'a[rel="next"]', 'ul.a-pagination li.a-last:not(.a-disabled) a', '.a-pagination .a-last:not(.a-disabled) a',
-      'li.a-last:not(.a-disabled) a', 'a.s-pagination-next:not(.s-pagination-disabled)',
-      'button[aria-label*="next" i]:not([disabled])', '[role="button"][aria-label*="next" i]',
-      'input[type="submit"][value*="next" i]', '[data-action="next"]', '[data-testid*="next" i]'
+      'a[rel="next"]',
+      'ul.a-pagination li.a-last:not(.a-disabled) a[href]',
+      '.a-pagination .a-last:not(.a-disabled) a[href]',
+      'li.a-last:not(.a-disabled) a[href]',
+      'a.s-pagination-next:not(.s-pagination-disabled)',
+      'a[aria-label="Go to next page"]',
+      'a[aria-label*="next page" i]',
+      '.a-pagination button[aria-label*="next" i]:not([disabled])',
+      '.a-pagination [role="button"][aria-label*="next" i]',
+      '[data-testid*="pagination" i] a[aria-label*="next" i]'
     ];
     for (const selector of selectors) {
       try {
         const el = doc.querySelector(selector);
-        if (el && el.getAttribute?.('aria-disabled') !== 'true' && !el.closest?.('.a-disabled')) return true;
+        if (el && !isDisabledPaginationControl(el)) return true;
       } catch (_) {}
     }
-    for (const el of Array.from(doc.querySelectorAll('a, button, [role="button"], input[type="submit"], li'))) {
-      const text = normalizeText(el.innerText || el.textContent || el.value || el.getAttribute?.('aria-label') || el.getAttribute?.('title') || '').toLowerCase();
-      if (!/(^|\b)next(?:\s+page)?(?:\b|\s*[→›»])/.test(text)) continue;
-      if (el.disabled || el.getAttribute?.('aria-disabled') === 'true' || el.closest?.('.a-disabled')) continue;
-      return true;
+
+    // Numeric N+1 links are also authoritative, but only when their href/ancestor proves they are
+    // pagination controls. This handles Amazon's hash pager even if it omits a separate Next anchor.
+    let controls = [];
+    try { controls = Array.from(doc.querySelectorAll('a[href], button, [role="button"], li, span')); } catch (_) {}
+    for (const el of controls) {
+      if (!paginationControlContext(el)) continue;
+      if (isDisabledPaginationControl(el)) continue;
+      const href = String(el.getAttribute?.('href') || el.href || el.getAttribute?.('data-href') || el.getAttribute?.('data-url') || '');
+      const text = normalizeText(el.innerText || el.textContent || el.getAttribute?.('aria-label') || el.getAttribute?.('title') || '').toLowerCase();
+      const isNext = /#(?:time\/20\d{2}\/)?pagination\/next\/?/i.test(href) || /(^|\b)next(?:\s+page)?(?:\b|\s*[→›»])/.test(text);
+      if (isNext) {
+        const tag = String(el.tagName || '').toLowerCase();
+        if (href || tag === 'button' || String(el.getAttribute?.('role') || '').toLowerCase() === 'button') return true;
+      }
+      const pageNumber = paginationPageNumberFromControl(el);
+      if (currentPage != null && pageNumber != null && pageNumber > currentPage) return true;
     }
     return false;
   }
@@ -1413,7 +1490,7 @@
       historyPageLinks: extractOrderHistoryLinks(doc, url),
       nextPageUrl: findNextLink(doc, url),
       nextPageCandidates: nextPageCandidates(doc, url),
-      hasNextPageControl: hasNextPageControl(doc),
+      hasNextPageControl: hasNextPageControl(doc, url),
       historyOrderIds: isOrderHistoryPage(doc, url) ? extractOrderIds(bodyText) : [],
       historyVisibleCount: isOrderHistoryPage(doc, url) ? extractOrderIds(bodyText).length : 0,
       historyTotalOrders: isOrderHistoryPage(doc, url) ? totalOrdersForCurrentFilter(doc) : null,

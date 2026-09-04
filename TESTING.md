@@ -266,3 +266,11 @@ A user-testable development build may merge only after `npm test` and PR CI pass
 3. Confirm a normal order without a real Detail URL still hard-stops with its exact Order ID.
 4. Verify RAMPOW `111-1110034-5588263` and Milton `111-8528386-2632255` no longer show `Item identity conflict` when return-page ASIN evidence is not directly bound to the returned item.
 5. Confirm a test fixture with directly bound contradictory ASIN evidence still enters Needs Review.
+
+
+## v0.18.6 final-page / year rollover
+1. Let the verified updater install v0.18.6 automatically.
+2. Run a fresh lifetime scan through the last page of the current year.
+3. On a pager where page 18 is selected and Next is disabled, confirm the crawler does not attempt page 19.
+4. Confirm the current year is marked complete and page 1 of the next older discovered year is queued.
+5. Confirm a non-final page with enabled Next or a concrete numeric N+1 still advances only after the Order-ID fingerprint changes.
