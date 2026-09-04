@@ -1,0 +1,39 @@
+name: Apply v0.18.7 item status and milestone hardening
+
+on:
+  push:
+    branches: [v0187-item-status-and-milestones]
+    paths:
+      - '.github/workflows/apply-v0187.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0187-item-status-and-milestones
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply v0.18.7 fixes
+        run: python3 tools/apply_v0187.py
+      - name: Validate generated source
+        run: |
+          node --check parser.js
+          node --check storage.js
+          node --check item-model.js
+          node --check dashboard.js
+          node --check background.js
+          npm test
+      - name: Commit durable implementation and remove temporary machinery
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f tools/apply_v0187.py .github/workflows/apply-v0187.yml
+          git add -A
+          git commit -m 'Implement v0.18.7 evidence-safe milestones and per-product order state [v0187-generated]'
+          git push origin HEAD:v0187-item-status-and-milestones
