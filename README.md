@@ -2,13 +2,14 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.8 candidate for Issue #27.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.9 candidate for Issue #29.** GitHub is the source of truth and chat sessions are disposable.
 
 Current live acceptance trackers:
 
 - **#7 — live Amazon Business acceptance** for the authoritative crawler/return behavior.
 - **#23 — final-page year rollover acceptance** proving a disabled `Next` ends the current year and starts the next older year.
-- **#25 — v0.18.7 acceptance** for evidence-safe return milestones, faster serial crawl pacing, and per-product order status.
+- **#25 — v0.18.7 acceptance** for faster serial crawl pacing and per-product order status.
+- **#29 — v0.18.9 acceptance** for authoritative return progress, complete-only ledger views, Processing/Errors isolation, and sort/filter/search. Issue #29 supersedes #27 for the remaining lifecycle defect.
 
 Updater Issue **#10 is closed** after unattended live update from v0.18.3 to v0.18.4 succeeded on the second Windows PC.
 
@@ -19,9 +20,9 @@ Use [`NEW_CHAT_PROMPT.md`](NEW_CHAT_PROMPT.md). `SESSION_PROTOCOL.md` defines ma
 ## Resume development
 
 1. Read `AGENTS.md`, `PROJECT_HANDOFF.md`, `README.md`, `TESTING.md`, and `SESSION_PROTOCOL.md`.
-2. Read Issues #7, #23, and #25 and any newer issue that supersedes their scope.
+2. Read Issues #7, #23, #25, and #29 and any newer issue that supersedes their scope.
 3. Inspect root source, `manifest.json`, recent commits, open PRs/issues, and tests before editing.
-4. Root v0.18.7 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
+4. Root v0.18.9 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
 5. Run `npm test` before packaging or merging changes.
 6. Every user-testable development revision must bump both `manifest.json` and `package.json` to the same newer Chrome version.
 7. Keep implementation, regression tests, docs, issue state, and handoff synchronized.
@@ -154,7 +155,7 @@ Card last four is extracted only from payment-method/payment-information evidenc
 
 Every row uses the same fixed `Details | Credit | Reset | Refresh` action group. `Refresh` uses the stored real Order Details URL, opens an inactive Amazon tab, parses rendered canonical details, follows real same-order return-status links when present, saves fresh state, and closes the temporary tab.
 
-Views remain `All orders`, `Returns`, and `Needs review`, with no horizontally scrollable order containers. Needs Review dollars equal the expected-refund sum for return records currently flagged for review.
+Completed-data views are `All orders`, `Returns`, and `Needs review`; incomplete work is isolated in `Processing` and terminal per-order failures in `Errors`. No order container may scroll horizontally. Needs Review dollars equal the expected-refund sum for return records currently flagged for review.
 
 ### Development reset policy
 
