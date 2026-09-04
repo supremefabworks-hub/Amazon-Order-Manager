@@ -242,11 +242,55 @@
     scanTimer = setTimeout(() => scanPage({ notify, discover: true }), Math.max(100, delay));
   }
 
+
+  function workerReadiness(job = {}) {
+    const text = String(document.body?.innerText || document.body?.textContent || '');
+    const normalized = parser.normalizeText(text);
+    const blocked = /sorry,? we just need to make sure|not a robot|enter the characters you see below|type the characters you see|captcha/i.test(text);
+    const signIn = /(?:^|\n)sign in(?:\n|$)|email or mobile phone number|enter your password/i.test(text) && !/\b\d{3}-\d{7}-\d{7}\b/.test(text);
+    const rateLimited = /too many requests|request throttled|temporarily unavailable|service unavailable|please try again later/i.test(text) && !/\b\d{3}-\d{7}-\d{7}\b/.test(text);
+    if (blocked || signIn) return { ok: true, ready: false, blocked: true, rateLimited: false, error: blocked ? 'Amazon requested human verification in the background tab.' : 'Amazon requires sign-in in the background tab.' };
+    if (rateLimited) return { ok: true, ready: false, blocked: false, rateLimited: true, error: 'Amazon appears to be throttling requests.' };
+
+    const type = String(job?.type || '').toLowerCase();
+    const orderId = String(job?.orderId || '').trim();
+    const orderIds = parser.extractOrderIds(normalized);
+    let ready = false;
+    let reason = 'generic-content';
+
+    if (type === 'history' || type === 'advance') {
+      ready = orderIds.length > 0;
+      reason = ready ? 'history-order-fingerprint' : 'waiting-for-history-orders';
+    } else if (type === 'detail') {
+      const canonicalRoute = /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html|order-details)/i.test(location.pathname);
+      const matchingOrder = !orderId || orderIds.includes(orderId) || location.href.includes(orderId);
+      let productAnchor = null;
+      try { productAnchor = document.querySelector('a[href*="/dp/"], a[href*="/gp/product/"], a[href*="/product/"]'); } catch (_) {}
+      const hasSummary = /(?:Order Summary|Grand Total|Item\(s\) Subtotal|Total before tax|Order total)/i.test(normalized);
+      ready = Boolean(canonicalRoute && matchingOrder && hasSummary && (productAnchor || /(?:Cancelled|Canceled)/i.test(normalized)));
+      reason = ready ? 'canonical-detail-evidence' : 'waiting-for-detail-evidence';
+    } else if (type === 'return') {
+      const returnRoute = /\/spr\/returns\/(?:prep|label)|\/returns?\/(?:status|details)/i.test(location.pathname);
+      const matchingOrder = !orderId || orderIds.includes(orderId) || location.href.includes(orderId);
+      const lifecycle = /(?:Initiated|Return request|Drop off|Dropped off|Return received|Refund issued|Refund credited|Replacement)/i.test(normalized);
+      ready = Boolean(returnRoute && matchingOrder && lifecycle);
+      reason = ready ? 'return-lifecycle-evidence' : 'waiting-for-return-evidence';
+    } else {
+      ready = normalized.length >= 80;
+    }
+
+    return { ok: true, ready, blocked: false, rateLimited: false, reason, orderCount: orderIds.length, url: location.href };
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message) return;
     if (message.type === 'ARL_SCAN_PAGE') {
       scanPage({ force: true, notify: true, discover: true }).then(sendResponse);
       return true;
+    }
+    if (message.type === 'ARL_WORKER_READY') {
+      sendResponse(workerReadiness(message.job || {}));
+      return;
     }
     if (message.type === 'ARL_WORKER_SCAN') {
       (async () => {
@@ -263,18 +307,21 @@
         // Some Amazon order-history pages populate more cards while scrolling. Do this only
         // inside the inactive worker tab, never in the user's active Amazon tab.
         if (message.job?.type === 'history') {
+          // Amazon can lazy-load additional order cards after reaching the bottom. Stabilize on
+          // both document height and the visible Order-ID fingerprint so shorter waits cannot hide
+          // late-arriving orders. Three consecutive stable samples are required.
           let stable = 0;
-          let previousHeight = 0;
           for (let i = 0; i < 18; i += 1) {
             const height = Math.max(document.body?.scrollHeight || 0, document.documentElement?.scrollHeight || 0);
+            const fingerprint = parser.extractOrderIds(document.body?.innerText || document.body?.textContent || '').join('|');
             window.scrollTo(0, height);
-            await new Promise(resolve => setTimeout(resolve, randomBetween(450, 1050)));
+            await new Promise(resolve => setTimeout(resolve, randomBetween(180, 380)));
             const nextHeight = Math.max(document.body?.scrollHeight || 0, document.documentElement?.scrollHeight || 0);
-            if (nextHeight === previousHeight || nextHeight === height) stable += 1; else stable = 0;
-            previousHeight = nextHeight;
-            if (stable >= 2) break;
+            const nextFingerprint = parser.extractOrderIds(document.body?.innerText || document.body?.textContent || '').join('|');
+            if (nextFingerprint && nextHeight === height && nextFingerprint === fingerprint) stable += 1; else stable = 0;
+            if (stable >= 3) break;
           }
-          await new Promise(resolve => setTimeout(resolve, randomBetween(700, 1600)));
+          await new Promise(resolve => setTimeout(resolve, randomBetween(250, 600)));
         }
         const scanned = await scanPage({ force: true, notify: false, discover: false, reportChange: false });
         if (message.job?.type === 'return' && scanned?.ok) {

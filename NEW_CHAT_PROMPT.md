@@ -142,3 +142,7 @@ Current UI cleanup baseline: v0.18.10 / Issue #31 consolidates Complete orders +
 
 ### Replacement workflow rule
 Treat replacement and return as independent product workflows. Only suppress a replacement-management return-status link when product-scoped Amazon evidence explicitly proves no return is required. Otherwise retain normal return eligibility. Replacement-only orders are not refunds and must not display `$0.00` as a refund placeholder.
+
+
+### Smart-fast pacing rule
+The v0.18.12 default crawler is serial and adaptive: 75–250 ms inter-job delay, 60–90-job normal bursts, 8–15 sec normal cooldown, unchanged 10–20 min Amazon throttle cooldown. Rendered pages use job-specific readiness polling, but readiness only controls when parsing starts; authoritative parser/completeness/fingerprint gates remain mandatory and a readiness timeout falls through to normal scanning. Never add parallel Amazon jobs as a speed optimization without an explicit architecture decision and new safety review.

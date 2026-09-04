@@ -2,7 +2,7 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.11 candidate for Issue #33.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.12 candidate for Issue #35.** GitHub is the source of truth and chat sessions are disposable.
 
 Current live acceptance trackers:
 
@@ -12,6 +12,7 @@ Current live acceptance trackers:
 - **#29 — v0.18.9 acceptance** for authoritative return progress and complete-only ledger behavior.
 - **#31 — v0.18.10 acceptance** for consolidated dashboard metrics and four user-facing views: Orders, Returns, Return review, Errors.
 - **#33 — v0.18.11 acceptance** for replacement detection and replacement-vs-return separation.
+- **#35 — v0.18.12 acceptance** for adaptive smart-fast serial crawl pacing and rate-limit safety.
 
 Updater Issue **#10 is closed** after unattended live update from v0.18.3 to v0.18.4 succeeded on the second Windows PC.
 
@@ -22,9 +23,9 @@ Use [`NEW_CHAT_PROMPT.md`](NEW_CHAT_PROMPT.md). `SESSION_PROTOCOL.md` defines ma
 ## Resume development
 
 1. Read `AGENTS.md`, `PROJECT_HANDOFF.md`, `README.md`, `TESTING.md`, and `SESSION_PROTOCOL.md`.
-2. Read Issues #7, #23, #25, #29, #31, and #33 and any newer issue that supersedes their scope.
+2. Read Issues #7, #23, #25, #29, #31, #33, and #35 and any newer issue that supersedes their scope.
 3. Inspect root source, `manifest.json`, recent commits, open PRs/issues, and tests before editing.
-4. Root v0.18.11 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
+4. Root v0.18.12 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
 5. Run `npm test` before packaging or merging changes.
 6. Every user-testable development revision must bump both `manifest.json` and `package.json` to the same newer Chrome version.
 7. Keep implementation, regression tests, docs, issue state, and handoff synchronized.
@@ -229,3 +230,8 @@ v0.18.10 removes the redundant `Order details` stat because complete orders are 
 ## v0.18.11 replacement workflow separation
 
 Amazon replacements are modeled independently from refund returns. Product-scoped Order Details evidence such as `Replacement requested`, `Replacement shipped`, `Replacement delivered`, and `Replacement complete` is retained on the purchased item. A replacement-management `/spr/returns/prep` link is excluded from return/refund processing only when the same product context affirmatively proves that no return is required. Replacement workflows without that proof remain return-eligible because some replacements require the original item back. Replacement-only orders do not count as Returns, do not show a synthetic `$0.00` refund, and expose replacement state in the order/product UI and status filter. Issue #33 tracks live acceptance.
+
+
+## v0.18.12 adaptive smart-fast serial pacing
+
+v0.18.12 speeds the default crawler without adding concurrency. Inter-job delay is 75–250 ms, normal bursts are 60–90 jobs with 8–15 second cooldowns, and Amazon throttle cooldown remains 10–20 minutes. Rendered worker pages no longer use a blind 450–900 ms settle delay: after Chrome reports navigation complete, the background worker polls a lightweight content-script readiness probe after 100–150 ms and every 75–125 ms for up to 700 ms. Detail/history/return readiness requires job-specific DOM evidence. A readiness timeout is not accepted as completeness; it falls through to the existing authoritative scan/retry/completeness gates. History lazy-load settling now requires both document height and visible Order-ID fingerprint to remain stable for three samples. The crawler remains one job at a time. Issue #35 tracks live throughput/rate-limit acceptance.

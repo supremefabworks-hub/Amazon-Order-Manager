@@ -314,3 +314,12 @@ A user-testable development build may merge only after `npm test` and PR CI pass
 3. Verify the order/product shows the actual replacement stage and no return lifecycle. Refund must be `—`, and the order must not appear in Returns or Return review.
 4. Verify the Replacement status filter finds it.
 5. Verify a replacement that does not explicitly waive original-item return remains eligible for return processing rather than being suppressed.
+
+
+## v0.18.12 smart-fast live acceptance
+1. Let the updater install v0.18.12 and start a fresh lifetime scan.
+2. Compare visible throughput with v0.18.11; target is a noticeable additional improvement without parallel requests.
+3. Confirm history pages still capture every visible Order ID before advancing and final-page/year rollover behavior remains correct.
+4. Confirm multi-product, return lifecycle, replacement-only, payment-card, and complete-only ledger behavior remain unchanged.
+5. Watch scanner status for rate limiting/human verification. If Amazon throttles, confirm the crawler requeues the job and enters the unchanged 10–20 minute cooldown rather than retrying aggressively.
+6. Record pages/orders completed and any throttle count before closing Issue #35.

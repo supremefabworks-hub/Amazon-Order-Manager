@@ -9,14 +9,19 @@ const DETAIL_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
 const RETURN_DETAIL_REFRESH_MS = 24 * 60 * 60 * 1000;
 const RETURN_STATUS_REFRESH_MS = 6 * 60 * 60 * 1000;
 const HISTORY_REFRESH_MS = 24 * 60 * 60 * 1000;
-const JOB_DELAY_MIN_MS = 175;
-const JOB_DELAY_MAX_MS = 455;
-const LOAD_SETTLE_MIN_MS = 450;
-const LOAD_SETTLE_MAX_MS = 900;
-const BURST_MIN_JOBS = 40;
-const BURST_MAX_JOBS = 70;
-const COOLDOWN_MIN_MS = 10000;
-const COOLDOWN_MAX_MS = 25000;
+const JOB_DELAY_MIN_MS = 75;
+const JOB_DELAY_MAX_MS = 250;
+const FETCH_DISPATCH_MIN_MS = 60;
+const FETCH_DISPATCH_MAX_MS = 140;
+const READY_INITIAL_MIN_MS = 100;
+const READY_INITIAL_MAX_MS = 150;
+const READY_POLL_MIN_MS = 75;
+const READY_POLL_MAX_MS = 125;
+const READY_TIMEOUT_MS = 700;
+const BURST_MIN_JOBS = 60;
+const BURST_MAX_JOBS = 90;
+const COOLDOWN_MIN_MS = 8000;
+const COOLDOWN_MAX_MS = 15000;
 const RATE_LIMIT_COOLDOWN_MIN_MS = 10 * 60 * 1000;
 const RATE_LIMIT_COOLDOWN_MAX_MS = 20 * 60 * 1000;
 const LOAD_TIMEOUT_MS = 45000;
@@ -728,13 +733,46 @@ async function navigateExistingWorkerTab(tabId, url) {
   return waitForTabComplete(tabId, url);
 }
 
+async function waitForWorkerReady(tabId, job) {
+  await delay(randomBetween(READY_INITIAL_MIN_MS, READY_INITIAL_MAX_MS));
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  let lastState = null;
+  while (Date.now() < deadline) {
+    try {
+      const state = await chrome.tabs.sendMessage(tabId, { type: 'ARL_WORKER_READY', job });
+      lastState = state || null;
+      if (state?.blocked) {
+        const error = new Error(state.error || 'Amazon requested human verification in the background tab.');
+        error.blocked = true;
+        throw error;
+      }
+      if (state?.rateLimited) {
+        const error = new Error(state.error || 'Amazon appears to be throttling requests.');
+        error.rateLimited = true;
+        throw error;
+      }
+      if (state?.ready) return { ready: true, timedOut: false, state };
+    } catch (error) {
+      if (error?.blocked || error?.rateLimited) throw error;
+      // A content script may not be addressable on the first poll immediately after navigation.
+      // Keep polling inside the bounded readiness window; the authoritative scan still has its
+      // existing retry path below.
+    }
+    await delay(randomBetween(READY_POLL_MIN_MS, READY_POLL_MAX_MS));
+  }
+  // Readiness is only an optimization gate, never a completeness shortcut. If the lightweight
+  // probe cannot prove readiness quickly, fall through to the normal authoritative scan, whose
+  // existing parser/retry/completeness checks decide whether the job is valid.
+  return { ready: false, timedOut: true, state: lastState };
+}
+
 async function scanWorkerTab(tabId, job) {
-  await delay(randomBetween(LOAD_SETTLE_MIN_MS, LOAD_SETTLE_MAX_MS));
+  const readiness = await waitForWorkerReady(tabId, job);
   let lastError = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const result = await chrome.tabs.sendMessage(tabId, { type: 'ARL_WORKER_SCAN', job });
-      if (result?.ok) return result;
+      if (result?.ok) return { ...result, workerReadiness: readiness };
       lastError = new Error(result?.error || 'Worker scan returned no data');
       if (result?.blocked) lastError.blocked = true;
       if (result?.rateLimited) lastError.rateLimited = true;
@@ -1102,7 +1140,7 @@ async function runJob(job) {
     if (!job.url) throw new Error('Canonical Order Details URL is missing; crawler will not synthesize one.');
     const hostUrl = job.historyUrl || state.crawl.currentHistoryUrl || 'https://www.amazon.com/gp/your-account/order-history';
     const tabId = await ensureFetchHostTab(hostUrl);
-    await delay(randomBetween(105, 245));
+    await delay(randomBetween(FETCH_DISPATCH_MIN_MS, FETCH_DISPATCH_MAX_MS));
     let result;
     try {
       result = await chrome.tabs.sendMessage(tabId, {

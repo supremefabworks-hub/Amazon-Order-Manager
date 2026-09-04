@@ -112,11 +112,21 @@ assert(typeof sandbox.syntheticDetailUrl === 'undefined', 'v0.17 must not expose
 console.log('v0.17 background regressions passed');
 
 
-const backgroundSourceV0187 = fs.readFileSync(__dirname + '/background.js', 'utf8');
-assert(backgroundSourceV0187.includes('const JOB_DELAY_MIN_MS = 175;') && backgroundSourceV0187.includes('const JOB_DELAY_MAX_MS = 455;'), 'v0.18.7 normal inter-job pacing should be about 30% faster');
-assert(backgroundSourceV0187.includes('const LOAD_SETTLE_MIN_MS = 450;') && backgroundSourceV0187.includes('const LOAD_SETTLE_MAX_MS = 900;'), 'v0.18.7 page settle pacing should be about 30% faster');
-assert(backgroundSourceV0187.includes('RATE_LIMIT_COOLDOWN_MIN_MS = 10 * 60 * 1000') && backgroundSourceV0187.includes('RATE_LIMIT_COOLDOWN_MAX_MS = 20 * 60 * 1000'), 'rate-limit cooldown safety must remain unchanged');
-console.log('v0.18.7 pacing regression passed');
+const backgroundSourceV01812 = fs.readFileSync(__dirname + '/background.js', 'utf8');
+const contentSourceV01812 = fs.readFileSync(__dirname + '/content.js', 'utf8');
+assert(backgroundSourceV01812.includes('const JOB_DELAY_MIN_MS = 75;') && backgroundSourceV01812.includes('const JOB_DELAY_MAX_MS = 250;'), 'v0.18.12 must use the approved smart-fast inter-job pacing');
+assert(backgroundSourceV01812.includes('const READY_INITIAL_MIN_MS = 100;') && backgroundSourceV01812.includes('const READY_INITIAL_MAX_MS = 150;'), 'v0.18.12 readiness polling must start after a short 100-150 ms delay');
+assert(backgroundSourceV01812.includes('const READY_POLL_MIN_MS = 75;') && backgroundSourceV01812.includes('const READY_POLL_MAX_MS = 125;') && backgroundSourceV01812.includes('const READY_TIMEOUT_MS = 700;'), 'v0.18.12 readiness polling bounds must stay explicit');
+assert(backgroundSourceV01812.includes('const BURST_MIN_JOBS = 60;') && backgroundSourceV01812.includes('const BURST_MAX_JOBS = 90;'), 'normal burst size must be 60-90 serial jobs');
+assert(backgroundSourceV01812.includes('const COOLDOWN_MIN_MS = 8000;') && backgroundSourceV01812.includes('const COOLDOWN_MAX_MS = 15000;'), 'normal cooldown must be 8-15 seconds');
+assert(backgroundSourceV01812.includes('RATE_LIMIT_COOLDOWN_MIN_MS = 10 * 60 * 1000') && backgroundSourceV01812.includes('RATE_LIMIT_COOLDOWN_MAX_MS = 20 * 60 * 1000'), 'rate-limit cooldown safety must remain unchanged');
+assert(backgroundSourceV01812.includes('const LOAD_TIMEOUT_MS = 45000;'), '45-second navigation timeout must remain unchanged');
+assert(backgroundSourceV01812.includes('async function waitForWorkerReady') && backgroundSourceV01812.includes("type: 'ARL_WORKER_READY'"), 'rendered worker scans must use adaptive readiness polling');
+assert(backgroundSourceV01812.includes('return { ready: false, timedOut: true, state: lastState };') && backgroundSourceV01812.includes("type: 'ARL_WORKER_SCAN'"), 'readiness timeout must fall through to the authoritative scan rather than accepting incomplete data');
+assert(backgroundSourceV01812.includes('let processing = false;') && backgroundSourceV01812.includes('if (processing) return;'), 'crawler must remain single-job serial');
+assert(contentSourceV01812.includes("message.type === 'ARL_WORKER_READY'") && contentSourceV01812.includes('canonical-detail-evidence') && contentSourceV01812.includes('history-order-fingerprint'), 'content script must expose job-specific readiness evidence');
+assert(contentSourceV01812.includes('nextFingerprint === fingerprint') && contentSourceV01812.includes('stable >= 3'), 'history lazy-load stabilization must require repeated stable height and Order-ID fingerprint');
+console.log('v0.18.12 adaptive smart-fast pacing regressions passed');
 
 
 const backgroundSourceV0189 = fs.readFileSync(__dirname + '/background.js', 'utf8');
