@@ -132,7 +132,7 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
 
   store.backgroundScanState = {
     running:false, paused:false, queue:[], currentJob:null,
-    crawl:{ active:true, phase:'details', years:[2026,2025], currentYear:2026, currentPage:31, currentHistoryUrl:resumeUrl, currentPageOrderIds:[resumeOrderId], currentPageCompleted:1, completedOrders:{ [resumeOrderId]:{at:new Date().toISOString(),year:2026,page:31} }, seenOrders:{ [resumeOrderId]:{year:2026,page:31,pageKey:'2026:31'} }, seenPages:{'2026:31':resumeOrderId} }
+    crawl:{ active:true, phase:'details', years:[2026,2025], currentYear:2026, currentPage:31, currentHistoryUrl:resumeUrl, currentPageOrderIds:[resumeOrderId], currentPageCompleted:1, ordersCompleted:1, completedOrders:{ [resumeOrderId]:{at:new Date().toISOString(),year:2026,page:31} }, seenOrders:{ [resumeOrderId]:{year:2026,page:31,pageKey:'2026:31'} }, seenPages:{'2026:31':resumeOrderId} }
   };
   await sandbox.startOrResumeFullScan({ restart:false, source:'manual-resume' });
   state = store.backgroundScanState;
@@ -147,13 +147,29 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
   state = store.backgroundScanState;
   const overlapRefreshes = state.queue.filter(j => j.type === 'detail' && j.orderId === resumeOrderId && j.resumeOverlapRefresh === true);
   assert(overlapRefreshes.length === 1, 'known Order ID on recovered page must queue one authoritative overlap refresh');
-  assert(state.crawl.ordersCompleted === 0, 'overlap refresh must not increment unique-order completion count');
+  assert(state.crawl.ordersCompleted === 1, 'overlap refresh must preserve the existing unique-order completion count without adding a second completion');
   await sandbox.queueManagedHistoryResult({
     scannedUrl: resumeUrl, historySelectedYear:2026, historyYears:[2026,2025], historyOrderIds:[resumeOrderId],
     detailLinks:[{orderId:resumeOrderId,url:resumeDetailUrl}], records:[]
   }, { historyYear:2026, historyPage:31, crawlManaged:true, resumeRecovery:true, resumeExpectedFingerprint:resumeOrderId });
   state = store.backgroundScanState;
   assert(state.queue.filter(j => j.type === 'detail' && j.orderId === resumeOrderId && j.resumeOverlapRefresh === true).length === 1, 'same overlap must not be refreshed repeatedly in one lifetime crawl');
+
+  // Ledger-backed recovery: completed canonical data is a secondary identity index when crawl
+  // metadata is missing. It must be adopted without counting a new order, then refreshed once.
+  store.ledger = [{ recordId:`order:${resumeOrderId}`, recordType:'order', orderId:resumeOrderId, orderDetailsUrl:resumeDetailUrl, detailScanComplete:true, orderDataComplete:true, lastScannedAt:new Date().toISOString() }];
+  store.backgroundScanState = {
+    running:false, paused:false, queue:[], currentJob:null,
+    crawl:{ active:true, phase:'resume', years:[2026], currentYear:2026, currentPage:31, currentHistoryUrl:resumeUrl, currentPageOrderIds:[], completedOrders:{}, seenOrders:{}, seenPages:{}, overlapRefreshedOrders:{} }
+  };
+  await sandbox.queueManagedHistoryResult({
+    scannedUrl:resumeUrl, historySelectedYear:2026, historyYears:[2026], historyOrderIds:[resumeOrderId], detailLinks:[], records:[]
+  }, { historyYear:2026, historyPage:31, crawlManaged:true, resumeRecovery:true });
+  state = store.backgroundScanState;
+  assert(state.crawl.completedOrders[resumeOrderId]?.adoptedFromLedger === true, 'known canonical ledger order must be adopted when crawl completion metadata is missing');
+  assert(state.crawl.ordersCompleted === 1, 'ledger adoption must derive unique completion count without double-counting');
+  assert(state.queue.some(j => j.type === 'detail' && j.orderId === resumeOrderId && j.resumeOverlapRefresh === true), 'ledger-adopted order must receive one authoritative overlap refresh');
+  assert(state.queue.filter(j => j.type === 'detail' && j.orderId === resumeOrderId && !j.resumeOverlapRefresh).length === 0, 'ledger-adopted order must not be treated as a new canonical detail job');
 
   delete store.installedExtensionVersion;
   store.ledger = [{ recordId:'order:legacy', recordType:'order', orderId:'113-1111111-1111111' }];

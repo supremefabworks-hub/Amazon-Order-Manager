@@ -458,7 +458,32 @@ async function queueManagedHistoryResult(result, job) {
   const terminalByOrder = terminalCancelledHistoryOrders(result);
   const pageOrderIds = historyOrderIdSet(result);
   if (!pageOrderIds.length) throw new Error(`No visible Amazon Order IDs were found on ${year} page ${page}`);
+
+  const ledgerData = await chrome.storage.local.get([LEDGER_KEY]);
+  const ledger = Array.isArray(ledgerData[LEDGER_KEY]) ? ledgerData[LEDGER_KEY] : [];
+  const ledgerOrders = new Map();
+  for (const record of ledger) {
+    if (record?.recordType !== 'order' || !record?.orderId) continue;
+    const prior = ledgerOrders.get(record.orderId);
+    if (!prior || (record.orderDataComplete && !prior.orderDataComplete) || String(record.lastScannedAt || '') > String(prior.lastScannedAt || '')) {
+      ledgerOrders.set(record.orderId, record);
+    }
+  }
+  const ledgerCompleteIds = new Set(Array.from(ledgerOrders.values())
+    .filter(record => record?.orderDataComplete === true || (record?.historyTerminalComplete === true && record?.historyTerminalState === 'cancelled'))
+    .map(record => record.orderId));
+
   const linkByOrder = new Map(links.map(link => [link.orderId, link]));
+  // A previously captured canonical Detail URL remains real Amazon evidence. If a recovered
+  // history card temporarily omits its Detail action, reuse that stored real URL rather than
+  // synthesizing one or stopping on an already-known order.
+  for (const orderId of pageOrderIds) {
+    if (linkByOrder.has(orderId)) continue;
+    const storedUrl = ledgerOrders.get(orderId)?.orderDetailsUrl || null;
+    if (storedUrl && /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html|order-details)/i.test(storedUrl)) {
+      linkByOrder.set(orderId, { orderId, url: normalizeUrl(storedUrl) || storedUrl, source: 'stored-canonical-detail-url' });
+    }
+  }
   const missingDetailUrls = pageOrderIds.filter(orderId => !linkByOrder.has(orderId) && !terminalByOrder.has(orderId));
   if (missingDetailUrls.length) throw new Error(`Missing real View order details URL for ${missingDetailUrls.length} order(s) on ${year} page ${page}: ${missingDetailUrls.join(', ')}. The crawler stopped rather than inventing canonical URLs.`);
   const orderedLinks = pageOrderIds.map(orderId => linkByOrder.get(orderId)).filter(Boolean);
@@ -486,12 +511,20 @@ async function queueManagedHistoryResult(result, job) {
   }
 
   for (const orderId of pageOrderIds) {
-    if (!terminalByOrder.has(orderId) || crawl.completedOrders[orderId]) continue;
-    crawl.completedOrders[orderId] = { at: nowIso(), year, page, terminalState: 'cancelled', source: 'order-history-card' };
-    crawl.ordersCompleted = (crawl.ordersCompleted || 0) + 1;
-    crawl.lastCompletedOrderId = orderId;
-    crawl.lastCompletedAt = nowIso();
+    if (crawl.completedOrders[orderId]) continue;
+    if (terminalByOrder.has(orderId)) {
+      crawl.completedOrders[orderId] = { at: nowIso(), year, page, terminalState: 'cancelled', source: 'order-history-card' };
+      crawl.lastCompletedOrderId = orderId;
+      crawl.lastCompletedAt = nowIso();
+      continue;
+    }
+    if (ledgerCompleteIds.has(orderId)) {
+      crawl.completedOrders[orderId] = { at: nowIso(), year, page, source: 'existing-ledger', adoptedFromLedger: true };
+    }
   }
+  // Completion count is derived from the durable identity set so metadata recovery cannot double
+  // count adopted/overlapping IDs or undercount after a lost in-memory queue.
+  crawl.ordersCompleted = Object.keys(crawl.completedOrders).length;
   crawl.currentPageCompleted = pageOrderIds.filter(orderId => crawl.completedOrders[orderId]).length;
 
   const existingKeys = new Set(state.queue.map(jobKey));
@@ -504,11 +537,12 @@ async function queueManagedHistoryResult(result, job) {
     const alreadyComplete = Boolean(crawl.completedOrders[link.orderId]);
     const crossPageOverlap = Boolean(alreadyComplete && firstSeen?.pageKey && firstSeen.pageKey !== pageKey);
     const resumeDuplicate = Boolean(alreadyComplete && job?.resumeRecovery);
+    const ledgerAdopted = Boolean(alreadyComplete && crawl.completedOrders[link.orderId]?.adoptedFromLedger);
     if (alreadyComplete) {
       // A known Order ID is an anchor, not a reason to restart history. Refresh it once when it
       // proves the recovered/shifted page overlaps prior work, then continue without incrementing
       // lifetime completion or repeatedly hitting the same order during fallback navigation.
-      if ((resumeDuplicate || crossPageOverlap) && !crawl.overlapRefreshedOrders[link.orderId]) {
+      if ((resumeDuplicate || crossPageOverlap || ledgerAdopted) && !crawl.overlapRefreshedOrders[link.orderId]) {
         const refreshJob = {
           type: 'detail', orderId: link.orderId, url: normalizeUrl(link.url) || link.url,
           source: `resume-overlap ${pageKey}`, crawlManaged: true, resumeOverlapRefresh: true,
@@ -633,9 +667,22 @@ async function startOrResumeFullScan({ restart = false, startYear = null, source
   if (!restart && state.crawl.active) {
     if (source === 'auto-amazon' && state.crawl.manualStop) return state;
     // In the same live service worker, an in-memory processing=true means currentJob is genuinely
-    // in flight. Resume must not reinterpret it as stale. After a browser/service-worker restart
-    // processing is false, so persisted currentJob recovery still works exactly as intended.
-    if (processing && !state.paused) return state;
+    // in flight. Resume must not reinterpret it as stale. If the user manually resumes immediately
+    // after Stop, clear the latch and let that live job finish; its normal completion will schedule
+    // the next job. After a browser/service-worker restart processing is false, so persisted
+    // currentJob recovery still works exactly as intended.
+    if (processing) {
+      if (source !== 'auto-amazon') {
+        state.paused = false;
+        state.running = true;
+        state.crawl.manualStop = false;
+        state.crawl.lastResumeAt = nowIso();
+        state.crawl.lastResumeSource = source;
+        state.crawl.resumeCount = Number(state.crawl.resumeCount || 0) + 1;
+        await setState(state);
+      }
+      return state;
+    }
     const alreadyRunning = !state.paused && state.running && !state.currentJob && state.queue.length > 0;
     if (source === 'auto-amazon' && alreadyRunning) return state;
     state = reconstructActiveCrawl(state, source, { clearManualStop: source !== 'auto-amazon' });
