@@ -594,4 +594,12 @@
   storage.getSettings().then(settings => {
     if (settings.autoScan !== false) scheduleScan(randomBetween(AUTO_SCAN_DELAY_MIN_MS, AUTO_SCAN_DELAY_MAX_MS), true);
   });
+
+  // Tell the background worker that the USER has reached Amazon. The background checks sender.tab
+  // activity/identity before acting, so the extension's own inactive worker tab cannot recursively
+  // trigger Auto-start.
+  try {
+    chrome.runtime.sendMessage({ type: 'ARL_AMAZON_PAGE_READY', url: location.href }).catch(() => {});
+  } catch (_) {}
+
 })();

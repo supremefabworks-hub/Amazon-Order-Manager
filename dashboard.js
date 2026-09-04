@@ -13,6 +13,7 @@
   const sortOrder = document.getElementById('sortOrder');
   const scannerStatus = document.getElementById('scannerStatus');
   const scannerCheckpoint = document.getElementById('scannerCheckpoint');
+  const autoStartScanner = document.getElementById('autoStartScanner');
   const navAllCount = document.getElementById('navAllCount');
   const navReturnCount = document.getElementById('navReturnCount');
   const navReviewCount = document.getElementById('navReviewCount');
@@ -467,7 +468,15 @@
     }).join('');
   }
 
-  function render() { renderStats(); renderViewMenu(); renderTable(); }
+  function renderAutoStart() {
+    if (!autoStartScanner) return;
+    const enabled = Boolean(settings.autoStartOnAmazon);
+    autoStartScanner.textContent = `Auto-start: ${enabled ? 'On' : 'Off'}`;
+    autoStartScanner.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    autoStartScanner.classList.toggle('auto-start-enabled', enabled);
+  }
+
+  function render() { renderStats(); renderViewMenu(); renderTable(); renderAutoStart(); }
 
   function formatRemaining(ms) {
     if (!ms || ms <= 0) return '';
@@ -486,8 +495,9 @@
       const pageCount = (crawl.currentPageOrderIds || []).length;
       const doneOnPage = crawl.currentPageCompleted || 0;
       const yearsDone = (crawl.completedYears || []).length ? ` · completed years ${(crawl.completedYears || []).join(', ')}` : '';
+      const resumeInfo = crawl.lastResumeAt ? ` · resume #${crawl.resumeCount || 1} from ${crawl.resumePageKey || `${crawl.currentYear}:${crawl.currentPage || 1}`} (${crawl.lastResumeSource || 'resume'})` : '';
       scannerCheckpoint.textContent = crawl.currentYear
-        ? `Checkpoint: ${crawl.currentYear} page ${crawl.currentPage || 1} · ${doneOnPage}/${pageCount || '?'} details complete · ${crawl.ordersCompleted || 0} unique orders completed · ${crawl.overlapCount || 0} overlapping history hits${crawl.lastCompletedOrderId ? ` · last ${crawl.lastCompletedOrderId}` : ''}${yearsDone}`
+        ? `Checkpoint: ${crawl.currentYear} page ${crawl.currentPage || 1} · ${doneOnPage}/${pageCount || '?'} details complete · ${crawl.ordersCompleted || 0} unique orders completed · ${crawl.overlapCount || 0} overlapping history hits${crawl.lastCompletedOrderId ? ` · last ${crawl.lastCompletedOrderId}` : ''}${resumeInfo}${yearsDone}`
         : `Checkpoint: no lifetime scan started · ${crawl.overlapCount || 0} overlaps recorded`;
     } catch (error) {
       scannerStatus.textContent = `Status unavailable: ${error?.message || error}`;
@@ -539,6 +549,15 @@
   });
   search.addEventListener('input', render);
   for (const control of [statusFilter, yearFilter, cardFilter, sortOrder]) control?.addEventListener('change', render);
+
+
+  autoStartScanner?.addEventListener('click', async () => {
+    const enabled = !Boolean(settings.autoStartOnAmazon);
+    const response = await chrome.runtime.sendMessage({ type: 'ARL_SET_AUTO_START', enabled });
+    if (!response?.ok) { alert(`Could not update Auto-start: ${response?.error || 'unknown error'}`); return; }
+    settings = { ...settings, autoStartOnAmazon: enabled };
+    renderAutoStart();
+  });
 
   document.getElementById('startScanner').addEventListener('click', async () => {
     await chrome.runtime.sendMessage({ type: 'ARL_START_FULL_SCAN' }); await renderScannerStatus();

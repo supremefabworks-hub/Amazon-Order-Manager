@@ -361,3 +361,8 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .badge-replacement { background:#eef4ff; color:#234f8c; }
 .order-product-row.has-product-replacement { border-left:3px solid #5b7fb0; }
 .product-state.product-replacement { background:#eef4ff; color:#234f8c; }
+
+
+/* v0.18.14 durable resume / auto-start controls */
+.scanner-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+#autoStartScanner.auto-start-enabled { font-weight:700; }

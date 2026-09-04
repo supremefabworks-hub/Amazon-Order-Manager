@@ -7,6 +7,7 @@
     autoDetailScan: true,
     autoReturnScan: false,
     autoHistoryCrawl: true,
+    autoStartOnAmazon: false,
     showUpdateToast: true,
     workflowRecorderEnabled: false
   };

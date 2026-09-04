@@ -28,7 +28,6 @@ const LOAD_TIMEOUT_MS = 45000;
 const MAX_RECENT_KEYS = 6000;
 const WORKFLOW_LOG_KEY = 'workflowLog';
 const VERSION_KEY = 'installedExtensionVersion';
-const DEV_RESET_ON_VERSION_CHANGE = true;
 const MAX_WORKFLOW_EVENTS = 1600;
 let workflowRecorderEnabled = false;
 
@@ -38,18 +37,27 @@ let workerTabId = null;
 async function ensureDevelopmentVersionState(previousVersionHint = null) {
   const version = chrome.runtime?.getManifest?.()?.version || null;
   if (!version) return { changed: false, version: null };
-  const data = await chrome.storage.local.get([VERSION_KEY]);
+  const data = await chrome.storage.local.get([VERSION_KEY, STATE_KEY]);
   const prior = data[VERSION_KEY] || previousVersionHint || null;
   if (prior === version) return { changed: false, version };
-  if (DEV_RESET_ON_VERSION_CHANGE && prior) {
-    await chrome.storage.local.remove([
-      LEDGER_KEY, STATE_KEY, WORKER_TAB_KEY, WORKFLOW_LOG_KEY,
-      'lastBankVerificationRequest', 'lastBankVerificationImport'
-    ]);
+
+  // v0.18.14 ends destructive development-version resets for canonical ledger/crawl state.
+  // A version update may invalidate a transient Chrome tab ID, but it must not erase the exact
+  // lifetime-crawl checkpoint or hundreds of already completed canonical orders.
+  if (prior) {
     workerTabId = null;
+    await chrome.storage.local.remove([WORKER_TAB_KEY]).catch(() => {});
+    if (data[STATE_KEY]) {
+      const migrated = ensureCrawl({ ...defaultState(), ...data[STATE_KEY] });
+      migrated.running = false;
+      migrated.crawl.lastMigrationAt = nowIso();
+      migrated.crawl.lastMigrationFrom = String(prior);
+      migrated.crawl.lastMigrationTo = String(version);
+      await chrome.storage.local.set({ [STATE_KEY]: migrated });
+    }
   }
   await chrome.storage.local.set({ [VERSION_KEY]: version });
-  return { changed: Boolean(prior && prior !== version), previousVersion: prior, version };
+  return { changed: Boolean(prior && prior !== version), previousVersion: prior, version, preservedState: Boolean(prior) };
 }
 
 function randomBetween(min, max) {
@@ -145,9 +153,13 @@ function defaultState() {
     crawl: {
       active: false, phase: 'idle', years: [], completedYears: [], currentYear: null, currentPage: null,
       currentHistoryUrl: null, currentPageOrderIds: [], currentPageCompleted: 0,
-      seenOrders: {}, seenPages: {}, completedOrders: {}, overlapCount: 0, overlapExamples: [],
+      seenOrders: {}, seenPages: {}, completedOrders: {}, overlapCount: 0, overlapExamples: [], overlapRefreshedOrders: {},
       pagesCompleted: 0, ordersCompleted: 0, lastCompletedOrderId: null, lastCompletedAt: null,
-      startedAt: null, completedAt: null
+      startedAt: null, completedAt: null,
+      manualStop: false, lastResumeAt: null, lastResumeSource: null, resumeCount: 0,
+      resumePageKey: null, resumeExpectedFingerprint: null, resumeObservedFingerprint: null,
+      resumeFingerprintMatched: null, lastRecoveredJobKey: null, lastResumeOverlapError: null,
+      lastMigrationAt: null, lastMigrationFrom: null, lastMigrationTo: null
     }
   };
 }
@@ -165,7 +177,10 @@ function ensureCrawl(state) {
   state.crawl.seenOrders = state.crawl.seenOrders || {};
   state.crawl.seenPages = state.crawl.seenPages || {};
   state.crawl.completedOrders = state.crawl.completedOrders || {};
+  state.crawl.overlapRefreshedOrders = state.crawl.overlapRefreshedOrders || {};
   state.crawl.overlapExamples = Array.isArray(state.crawl.overlapExamples) ? state.crawl.overlapExamples.slice(-50) : [];
+  state.crawl.manualStop = Boolean(state.crawl.manualStop);
+  state.crawl.resumeCount = Number.isFinite(Number(state.crawl.resumeCount)) ? Number(state.crawl.resumeCount) : 0;
   return state;
 }
 
@@ -181,6 +196,7 @@ async function getSettings() {
     autoDetailScan: true,
     autoReturnScan: false,
     autoHistoryCrawl: true,
+    autoStartOnAmazon: false,
     showUpdateToast: true,
     workflowRecorderEnabled: false,
     ...(() => { const { ignoredCardLast4, ...clean } = data[SETTINGS_KEY] || {}; return clean; })()
@@ -447,6 +463,11 @@ async function queueManagedHistoryResult(result, job) {
   const pageKey = `${year}:${page}`;
   const fingerprint = pageOrderIds.join('|');
   const previousFingerprint = crawl.seenPages[pageKey];
+  if (job?.resumeRecovery) {
+    crawl.resumePageKey = pageKey;
+    crawl.resumeObservedFingerprint = fingerprint;
+    crawl.resumeFingerprintMatched = !job.resumeExpectedFingerprint || job.resumeExpectedFingerprint === fingerprint;
+  }
   if (previousFingerprint !== fingerprint) {
     for (const orderId of pageOrderIds) {
       const first = crawl.seenOrders[orderId];
@@ -471,12 +492,31 @@ async function queueManagedHistoryResult(result, job) {
 
   const existingKeys = new Set(state.queue.map(jobKey));
   if (state.currentJob) existingKeys.add(jobKey(state.currentJob));
+  crawl.overlapRefreshedOrders = crawl.overlapRefreshedOrders || {};
   let seq = 0;
   for (const link of orderedLinks) {
     seq += 1;
-    // A duplicate order ID on a later history page is not detail-scanned again during the same
-    // lifetime run. It is counted as overlap and the first capture remains authoritative.
-    if (crawl.completedOrders[link.orderId]) continue;
+    const firstSeen = crawl.seenOrders?.[link.orderId] || null;
+    const alreadyComplete = Boolean(crawl.completedOrders[link.orderId]);
+    const crossPageOverlap = Boolean(alreadyComplete && firstSeen?.pageKey && firstSeen.pageKey !== pageKey);
+    const resumeDuplicate = Boolean(alreadyComplete && job?.resumeRecovery);
+    if (alreadyComplete) {
+      // A known Order ID is an anchor, not a reason to restart history. Refresh it once when it
+      // proves the recovered/shifted page overlaps prior work, then continue without incrementing
+      // lifetime completion or repeatedly hitting the same order during fallback navigation.
+      if ((resumeDuplicate || crossPageOverlap) && !crawl.overlapRefreshedOrders[link.orderId]) {
+        const refreshJob = {
+          type: 'detail', orderId: link.orderId, url: normalizeUrl(link.url) || link.url,
+          source: `resume-overlap ${pageKey}`, crawlManaged: true, resumeOverlapRefresh: true,
+          crawlYear: year, crawlPage: page, crawlPageKey: pageKey, historyUrl: crawl.currentHistoryUrl,
+          sequence: seq, priority: 5, queuedAt: nowIso(), attempts: 0
+        };
+        const refreshKey = jobKey(refreshJob);
+        if (!existingKeys.has(refreshKey)) { state.queue.push(refreshJob); existingKeys.add(refreshKey); }
+        crawl.overlapRefreshedOrders[link.orderId] = { queuedAt: nowIso(), pageKey };
+      }
+      continue;
+    }
     const detailJob = {
       type: 'detail', orderId: link.orderId, url: normalizeUrl(link.url) || link.url,
       source: `crawl ${pageKey}`, crawlManaged: true, crawlYear: year, crawlPage: page,
@@ -503,15 +543,95 @@ async function queueManagedHistoryResult(result, job) {
   return { year, page, pageOrderIds };
 }
 
-async function startOrResumeFullScan({ restart = false, startYear = null } = {}) {
+
+function crawlCheckpointPageKey(crawl) {
+  const year = Number(crawl?.currentYear);
+  const page = Math.max(1, Number(crawl?.currentPage) || 1);
+  return Number.isFinite(year) ? `${year}:${page}` : null;
+}
+
+function recoverInterruptedCurrentJob(state, source = 'resume') {
+  const job = state?.currentJob || null;
+  if (!job) return false;
+  const key = jobKey(job);
+  if (!state.queue.some(candidate => jobKey(candidate) === key)) {
+    state.queue.unshift({ ...job, queuedAt: nowIso(), resumeRecovered: true, resumeSource: source });
+  }
+  state.currentJob = null;
+  state.crawl.lastRecoveredJobKey = key;
+  return true;
+}
+
+function reconstructActiveCrawl(state, source = 'manual-resume', { clearManualStop = true } = {}) {
+  state = ensureCrawl(state);
+  const crawl = state.crawl;
+  if (!crawl.active) return state;
+  if (clearManualStop) crawl.manualStop = false;
+  if (crawl.manualStop) return state;
+
+  const resumedAt = nowIso();
+  const recoveredCurrent = recoverInterruptedCurrentJob(state, source);
+  if (!state.queue.length) {
+    const year = Number(crawl.currentYear);
+    const page = Math.max(1, Number(crawl.currentPage) || 1);
+    if (!Number.isFinite(year)) throw new Error('Active crawl checkpoint is missing its current year');
+    const pageKey = `${year}:${page}`;
+    const url = crawl.currentHistoryUrl || buildHistoryUrl('https://www.amazon.com/gp/your-account/order-history', year, page);
+    const expectedFingerprint = crawl.seenPages?.[pageKey] || (crawl.currentPageOrderIds || []).join('|') || null;
+    state.queue.push({
+      type: 'history', url, historyYear: year, historyPage: page,
+      crawlManaged: true, source: `resume:${source}`, priority: 1, queuedAt: resumedAt, attempts: 0,
+      resumeRecovery: true, resumeExpectedFingerprint: expectedFingerprint, resumePageKey: pageKey
+    });
+    crawl.resumePageKey = pageKey;
+    crawl.resumeExpectedFingerprint = expectedFingerprint;
+    crawl.phase = 'resume';
+  }
+  crawl.lastResumeAt = resumedAt;
+  crawl.lastResumeSource = source;
+  crawl.resumeCount = Number(crawl.resumeCount || 0) + 1;
+  if (recoveredCurrent && !crawl.resumePageKey) crawl.resumePageKey = crawlCheckpointPageKey(crawl);
+  state.paused = false;
+  state.running = state.queue.length > 0;
+  sortQueue(state.queue);
+  return state;
+}
+
+async function resumePersistedCrawl(source = 'browser-startup') {
+  let state = ensureCrawl(await getState());
+  if (!state.crawl.active || state.paused || state.crawl.manualStop) return state;
+  state = reconstructActiveCrawl(state, source, { clearManualStop: false });
+  await setState(state);
+  if (state.queue.length) scheduleSoon(randomBetween(250, 700));
+  return state;
+}
+
+async function handleAmazonUserPageReady(sender) {
+  const tab = sender?.tab || null;
+  if (!tab || !Number.isInteger(tab.id) || tab.active !== true) return { ok: true, ignored: 'inactive-tab' };
+  if (tab.id === workerTabId) return { ok: true, ignored: 'worker-tab' };
+  const settings = await getSettings();
+  if (!settings.autoStartOnAmazon) return { ok: true, ignored: 'auto-start-disabled' };
   const state = ensureCrawl(await getState());
-  if (!restart && state.crawl.active && (state.queue.length || state.currentJob)) {
-    state.paused = false;
-    state.running = true;
+  if (state.crawl.manualStop) return { ok: true, ignored: 'manual-stop' };
+  if (state.crawl.phase === 'done' && !state.crawl.active) return { ok: true, ignored: 'lifetime-scan-complete' };
+  if (state.crawl.active && state.paused) return { ok: true, ignored: 'paused-error-or-user-stop' };
+  const resumed = await startOrResumeFullScan({ restart: false, source: 'auto-amazon' });
+  return { ok: true, autoStarted: true, state: resumed };
+}
+
+async function startOrResumeFullScan({ restart = false, startYear = null, source = 'manual' } = {}) {
+  let state = ensureCrawl(await getState());
+  if (!restart && state.crawl.active) {
+    if (source === 'auto-amazon' && state.crawl.manualStop) return state;
+    const alreadyRunning = !state.paused && state.running && !state.currentJob && state.queue.length > 0;
+    if (source === 'auto-amazon' && alreadyRunning) return state;
+    state = reconstructActiveCrawl(state, source, { clearManualStop: source !== 'auto-amazon' });
     await setState(state);
-    scheduleSoon(randomBetween(500, 1200));
+    if (state.queue.length) scheduleSoon(randomBetween(250, 700));
     return state;
   }
+  if (!restart && source === 'auto-amazon' && state.crawl.phase === 'done') return state;
 
   const year = Number(startYear) || new Date().getFullYear();
   state.queue = [];
@@ -528,7 +648,9 @@ async function startOrResumeFullScan({ restart = false, startYear = null } = {})
     currentYear: year,
     currentPage: 1,
     currentHistoryUrl: buildHistoryUrl('https://www.amazon.com/gp/your-account/order-history', year, 1),
-    startedAt: nowIso()
+    startedAt: nowIso(),
+    manualStop: false,
+    lastResumeSource: source
   };
   state.queue.push({
     type: 'history', url: state.crawl.currentHistoryUrl, historyYear: year, historyPage: 1,
@@ -1211,7 +1333,7 @@ async function runJob(job) {
   }
 
   if (job.type === 'detail') {
-    await patchOrderProcessing(job.orderId, { processingState: 'processing', processingError: null, processingErrorAt: null });
+    if (!job.resumeOverlapRefresh) await patchOrderProcessing(job.orderId, { processingState: 'processing', processingError: null, processingErrorAt: null });
     // Keep the worker parked on Amazon and fetch the canonical Order Details HTML through the
     // authenticated content-script context. This avoids one full browser navigation per order.
     const state = ensureCrawl(await getState());
@@ -1290,7 +1412,11 @@ async function processNextJob() {
   processing = true;
   try {
     const settings = await getSettings();
-    const state = ensureCooldownPlan(await getState());
+    let state = ensureCooldownPlan(await getState());
+    if (state.currentJob) {
+      state = reconstructActiveCrawl(state, 'worker-interruption', { clearManualStop: false });
+      await setState(state);
+    }
     const coolingMs = cooldownRemainingMs(state);
     if (coolingMs > 0 && !state.paused) {
       state.running = false;
@@ -1307,6 +1433,11 @@ async function processNextJob() {
     }
 
     if (!state.queue.length) {
+      if (state.crawl?.active && !state.paused && !state.crawl.manualStop) {
+        state = reconstructActiveCrawl(state, 'active-empty-queue', { clearManualStop: false });
+        await setState(state);
+        if (state.queue.length) { scheduleSoon(randomBetween(100, 300)); return; }
+      }
       state.running = false;
       state.currentJob = null;
       state.startedAt = null;
@@ -1348,7 +1479,7 @@ async function processNextJob() {
     // overwrite those newly queued jobs with the stale pre-job snapshot.
     const completionState = ensureCooldownPlan(await getState());
     completionState.processed += 1;
-    if (job.type === 'detail' && job.orderId) {
+    if (job.type === 'detail' && job.orderId && !job.resumeOverlapRefresh) {
       const nextAttempt = Number(job.attempts || 0) + (waitingForDetails ? 0 : 1);
       if (success) {
         await patchOrderProcessing(job.orderId, { processingState: 'complete', processingError: null, processingErrorAt: null, processingLastIssue: null });
@@ -1358,12 +1489,14 @@ async function processNextJob() {
         await patchOrderProcessing(job.orderId, { processingState: 'retrying', processingError: null, processingErrorAt: null, processingLastIssue: jobError });
       }
     }
-    if (jobError && !waitingForDetails) {
+    if (jobError && !waitingForDetails && !job.resumeOverlapRefresh) {
       completionState.errors += 1;
       completionState.lastError = jobError;
+    } else if (jobError && job.resumeOverlapRefresh) {
+      completionState.crawl.lastResumeOverlapError = jobError;
     }
 
-    const managedRetry = job.crawlManaged && !blocked && !rateLimited && !success && (job.type === 'detail' || job.type === 'advance' || job.type === 'history');
+    const managedRetry = !job.resumeOverlapRefresh && job.crawlManaged && !blocked && !rateLimited && !success && (job.type === 'detail' || job.type === 'advance' || job.type === 'history');
     if (blocked) {
       completionState.paused = true;
       completionState.running = false;
@@ -1491,6 +1624,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
+
+  if (message.type === 'ARL_AMAZON_PAGE_READY') {
+    handleAmazonUserPageReady(sender)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
   if (message.type === 'ARL_DISCOVERED') {
     // Page visits are still auto-parsed/saved by the content script, but background traversal is
     // controlled by Start/Stop so a passive page visit cannot create a second competing crawler.
@@ -1499,7 +1640,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'ARL_START_FULL_SCAN') {
-    startOrResumeFullScan({ restart: Boolean(message.restart), startYear: message.startYear || null })
+    startOrResumeFullScan({ restart: Boolean(message.restart), startYear: message.startYear || null, source: message.restart ? 'manual-restart' : 'manual-resume' })
       .then(state => sendResponse({ ok: true, state }))
       .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
@@ -1510,6 +1651,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       state = ensureCrawl(state);
       state.paused = true;
       state.running = false;
+      state.crawl.manualStop = true;
       state.crawl.phase = state.crawl.active ? 'paused' : state.crawl.phase;
       await setState(state);
       sendResponse({ ok: true, state });
@@ -1519,6 +1661,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'ARL_GET_BACKGROUND_STATUS') {
     getState().then(state => sendResponse({ ok: true, state })).catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
+
+  if (message.type === 'ARL_SET_AUTO_START') {
+    chrome.storage.local.get([SETTINGS_KEY]).then(async data => {
+      const current = data[SETTINGS_KEY] || {};
+      const enabled = Boolean(message.enabled);
+      await chrome.storage.local.set({ [SETTINGS_KEY]: { ...current, autoStartOnAmazon: enabled } });
+      sendResponse({ ok: true, enabled });
+    }).catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
 
@@ -1569,6 +1722,10 @@ chrome.tabs.onRemoved.addListener(tabId => {
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  ensureDevelopmentVersionState().then(() => getState()).then(state => { if (state.crawl?.active && !state.paused && state.queue?.length) scheduleSoon(randomBetween(1200, 3000)); }).catch(() => {});
+  ensureDevelopmentVersionState().then(() => resumePersistedCrawl('browser-startup')).catch(() => {});
 });
-chrome.runtime.onInstalled.addListener(details => { ensureDevelopmentVersionState(details?.previousVersion || null).catch(() => {}); });
+chrome.runtime.onInstalled.addListener(details => {
+  ensureDevelopmentVersionState(details?.previousVersion || null)
+    .then(() => resumePersistedCrawl('version-update'))
+    .catch(() => {});
+});

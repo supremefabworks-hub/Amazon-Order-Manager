@@ -2,7 +2,7 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.13 candidate for Issue #37.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.14 candidate for Issue #39.** GitHub is the source of truth and chat sessions are disposable.
 
 Current live acceptance trackers:
 
@@ -23,9 +23,9 @@ Use [`NEW_CHAT_PROMPT.md`](NEW_CHAT_PROMPT.md). `SESSION_PROTOCOL.md` defines ma
 ## Resume development
 
 1. Read `AGENTS.md`, `PROJECT_HANDOFF.md`, `README.md`, `TESTING.md`, and `SESSION_PROTOCOL.md`.
-2. Read Issues #7, #23, #25, #29, #31, #33, #35, and #37 and any newer issue that supersedes their scope.
+2. Read Issues #7, #23, #25, #29, #31, #33, #35, #37, and #39 and any newer issue that supersedes their scope.
 3. Inspect root source, `manifest.json`, recent commits, open PRs/issues, and tests before editing.
-4. Root v0.18.13 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
+4. Root v0.18.14 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
 5. Run `npm test` before packaging or merging changes.
 6. Every user-testable development revision must bump both `manifest.json` and `package.json` to the same newer Chrome version.
 7. Keep implementation, regression tests, docs, issue state, and handoff synchronized.
@@ -240,3 +240,12 @@ v0.18.12 speeds the default crawler without adding concurrency. Inter-job delay 
 ## v0.18.13 authoritative Reset & Refresh and dynamic version display
 
 Separate Reset and Refresh controls are replaced by one `Reset & Refresh` recovery action. It preserves only the selected Order ID and captured real Order Details URL, removes all stored product/return/refund/replacement/bank/manual derived state, reopens the order as incomplete, and immediately rebuilds it from canonical Amazon evidence using the existing serial crawler lock. A failed rebuild remains in Errors with the real Details URL so retry remains possible. The dashboard header no longer hard-codes a historical version; it renders `chrome.runtime.getManifest().version_name || version` from the installed build. Issue #37 tracks live acceptance.
+
+
+## v0.18.14 durable checkpoint resume and Amazon Auto-start
+
+An active lifetime crawl now resumes from its persisted year/page/history URL and Order-ID checkpoint even if the MV3 worker, Chrome, or inactive Amazon worker tab disappears. An interrupted `currentJob` is requeued exactly once; an active empty queue is reconstructed from the saved checkpoint instead of starting current-year page 1. Visible duplicate Order IDs act as resume anchors: a completed overlap can be authoritatively refreshed once, but it is never counted as a new order or used to restart traversal.
+
+`Auto-start: On/Off` is opt-in and defaults OFF. When enabled, loading an active user Amazon tab starts or resumes incomplete lifetime work in a separate inactive worker tab. Worker/inactive tabs cannot recursively trigger Auto-start, explicit Stop latches until manual Start/Resume or Restart, and a completed lifetime scan is not automatically restarted on every Amazon navigation.
+
+v0.18.14 also replaces destructive development-version resets with migration-preserved ledger/crawl state. Version updates clear stale transient worker-tab identity but keep canonical orders, returns, bank verification, and the exact crawl checkpoint so the updater itself no longer destroys resume progress. Issue #39 tracks live acceptance.

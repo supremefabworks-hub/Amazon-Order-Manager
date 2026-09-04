@@ -117,3 +117,15 @@ assert(dashboardJsV01813.includes('data-reset-refresh-order') && dashboardJsV018
 assert(!dashboardJsV01813.includes('data-refresh-order=') && !dashboardJsV01813.includes('data-action="reset"'), 'separate Reset and Refresh controls must be removed');
 assert(dashboardJsV01813.includes("type: 'ARL_RESET_REFRESH_ORDER'"), 'combined button must call the authoritative rebuild path');
 console.log('v0.18.13 reset-refresh/version UI regressions passed');
+
+
+const dashboardHtmlV01814 = fs.readFileSync(__dirname + '/dashboard.html', 'utf8');
+const dashboardJsV01814 = fs.readFileSync(__dirname + '/dashboard.js', 'utf8');
+const storageV01814 = fs.readFileSync(__dirname + '/storage.js', 'utf8');
+const contentV01814 = fs.readFileSync(__dirname + '/content.js', 'utf8');
+assert(dashboardHtmlV01814.includes('id="autoStartScanner"') && dashboardHtmlV01814.includes('Auto-start: Off'), 'scanner panel must expose an Auto-start toggle');
+assert(dashboardJsV01814.includes("type: 'ARL_SET_AUTO_START'") && dashboardJsV01814.includes('settings.autoStartOnAmazon'), 'dashboard Auto-start button must persist the setting');
+assert(storageV01814.includes('autoStartOnAmazon: false'), 'Auto-start must default OFF');
+assert(contentV01814.includes("type: 'ARL_AMAZON_PAGE_READY'"), 'Amazon content script must announce user-page readiness to Auto-start logic');
+assert(dashboardJsV01814.includes('resume #${crawl.resumeCount || 1}'), 'scanner checkpoint UI must expose resume diagnostics');
+console.log('v0.18.14 Auto-start/resume UI regressions passed');

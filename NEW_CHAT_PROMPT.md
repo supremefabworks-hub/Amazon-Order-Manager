@@ -150,3 +150,7 @@ The v0.18.12 default crawler is serial and adaptive: 75–250 ms inter-job delay
 
 ### Order recovery action
 Use one `Reset & Refresh` action only. It is an authoritative rebuild: preserve only the Order ID and captured real Order Details route, clear all order-scoped derived ledger data, then rebuild from Amazon under the serial worker lock. A failed rebuild must remain retryable in Errors. Dashboard version text must always come from the installed manifest, never a hard-coded string.
+
+
+### Durable resume / Auto-start rule
+Treat the persisted crawl checkpoint (year, page, current history URL, Order-ID fingerprint, completed IDs, queued/current job) as authoritative. Resume must never silently fall back to page 1 unless the user explicitly chooses Restart. Auto-start is opt-in, reacts only to active user Amazon tabs, uses a separate inactive worker tab, respects manual Stop, and must not recursively trigger from extension-created worker tabs. Development upgrades preserve ledger/crawl state; transient tab IDs may be cleared.

@@ -332,3 +332,12 @@ A user-testable development build may merge only after `npm test` and PR CI pass
 4. Confirm prior manual bank/reconciliation state for that Order ID is cleared by the rebuild.
 5. Test one forced/real refresh failure if available: the order must remain in Errors with its real Details URL and exact error, then successfully rebuild when retried.
 6. Run alongside/resume the lifetime crawler and verify no concurrent Amazon job race or skipped page occurs.
+
+
+## v0.18.14 durable resume / Auto-start live acceptance
+1. Upgrade an in-progress v0.18.13 scan to v0.18.14 and verify existing ledger totals plus the saved year/page checkpoint survive.
+2. Interrupt the inactive worker tab or close/reopen Chrome while a scan is running, then verify it resumes from the saved page/current job rather than current-year page 1.
+3. On the recovered page, verify already-completed Order IDs are recognized as overlaps, refreshed at most once, and do not increment unique-order completion; new/incomplete IDs still get canonical Order Details.
+4. Enable `Auto-start: On`, open an active Amazon user tab, and verify the extension starts/resumes using a separate inactive worker tab. Verify worker/inactive tabs do not recursively trigger it.
+5. Press Stop and navigate Amazon; verify Auto-start does not undo the explicit stop. Press Start / resume and verify the latch clears.
+6. Complete a lifetime scan and verify normal Amazon navigation does not automatically restart another full historical crawl.

@@ -148,3 +148,22 @@ assert(backgroundSourceV01813.includes('while (processing && Date.now() < waitDe
 assert(backgroundSourceV01813.includes("processingError: `reset-refresh:"), 'failed rebuild must retain an Errors-view shell');
 assert(backgroundSourceV01813.includes('await chrome.tabs.remove(tabId)'), 'Reset & Refresh must close its temporary inactive Amazon tab before releasing the lock');
 console.log('v0.18.13 reset-refresh background regressions passed');
+
+
+const backgroundSourceV01814 = fs.readFileSync(__dirname + '/background.js', 'utf8');
+assert(!backgroundSourceV01814.includes('DEV_RESET_ON_VERSION_CHANGE'), 'v0.18.14 must not destructively wipe ledger/crawl state on version update');
+assert(backgroundSourceV01814.includes('preservedState: Boolean(prior)'), 'version migration must explicitly preserve durable state');
+assert(backgroundSourceV01814.includes('chrome.storage.local.remove([WORKER_TAB_KEY])'), 'version migration must clear stale transient worker tab identity');
+assert(backgroundSourceV01814.includes('function recoverInterruptedCurrentJob'), 'resume must recover an interrupted persisted currentJob');
+assert(backgroundSourceV01814.includes('function reconstructActiveCrawl'), 'resume must reconstruct active crawl work from checkpoint');
+assert(backgroundSourceV01814.includes("source: `resume:${source}`") && backgroundSourceV01814.includes('crawl.currentHistoryUrl || buildHistoryUrl'), 'empty active queue must use saved current history checkpoint instead of page 1');
+assert(backgroundSourceV01814.includes("'active-empty-queue'"), 'processNextJob must self-heal an active empty queue');
+assert(backgroundSourceV01814.includes("resumeOverlapRefresh: true"), 'known Order IDs on recovered/overlap pages must receive one authoritative refresh');
+assert(backgroundSourceV01814.includes('overlapRefreshedOrders[link.orderId]'), 'overlap refresh must be deduped across the lifetime crawl');
+assert(backgroundSourceV01814.includes('!job.resumeOverlapRefresh && job.crawlManaged'), 'overlap refresh failure must not become a blocking managed retry');
+assert(backgroundSourceV01814.includes("message.type === 'ARL_AMAZON_PAGE_READY'"), 'background must support Amazon page-ready Auto-start trigger');
+assert(backgroundSourceV01814.includes("tab.active !== true") && backgroundSourceV01814.includes('tab.id === workerTabId'), 'Auto-start must ignore inactive/worker tabs');
+assert(backgroundSourceV01814.includes('state.crawl.manualStop'), 'Auto-start must respect explicit manual Stop latch');
+assert(backgroundSourceV01814.includes("resumePersistedCrawl('browser-startup')") && backgroundSourceV01814.includes("resumePersistedCrawl('version-update')"), 'browser/update startup must resume persisted active crawl');
+assert(backgroundSourceV01814.includes('RATE_LIMIT_COOLDOWN_MIN_MS = 10 * 60 * 1000') && backgroundSourceV01814.includes('RATE_LIMIT_COOLDOWN_MAX_MS = 20 * 60 * 1000'), 'v0.18.14 must preserve rate-limit cooldown safety');
+console.log('v0.18.14 durable resume/autostart background regressions passed');
