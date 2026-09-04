@@ -19,20 +19,60 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Correct generator replacement escaping
+      - name: Correct generator replacement boundaries
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path('tools/apply_v0183.py')
           text = p.read_text(encoding='utf-8')
-          old = "out, count = re.subn(pattern, replacement, text, count=1, flags=re.S)"
-          new = "out, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.S)"
-          if old not in text:
-              raise SystemExit('regex_once source line not found')
-          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          replacements = [
+              (
+                  "out, count = re.subn(pattern, replacement, text, count=1, flags=re.S)",
+                  "out, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.S)"
+              ),
+              (
+                  'r"  function extractStatusText\\(text\\) \\{.*?\\n  \\}\\n\\n  function parseTextRecord"',
+                  'r"  function extractStatusText\\(text\\) \\{.*?\\n  \\}\\n\\n  function inferPageType"'
+              ),
+              (
+                  'status_fn + "\\n  function parseTextRecord"',
+                  'status_fn + "\\n  function inferPageType"'
+              )
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'generator source fragment not found: {old}')
+              text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8')
           PY
       - name: Apply v0.18.3 fixes
         run: python3 tools/apply_v0183.py
+      - name: Complete legacy Order Details classification coverage
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('parser.js')
+          text = p.read_text(encoding='utf-8')
+          replacements = [
+              (
+                  "    if (/order-history|your-orders|yourorders|order-details|orderdetails|order-detail/.test(u)) return 'order';",
+                  "    if (/order-history|your-orders|yourorders|order-details|orderdetails|order-detail|\\/gp\\/css\\/summary\\/edit\\.html/.test(u)) return 'order';"
+              ),
+              (
+                  "    if (/\\/your-orders\\/order-details|\\/gp\\/your-account\\/order-details|orderdetails|order-detail/.test(u)) return false;",
+                  "    if (/\\/your-orders\\/order-details|\\/gp\\/your-account\\/order-details|\\/gp\\/css\\/summary\\/edit\\.html|orderdetails|order-detail/.test(u)) return false;"
+              ),
+              (
+                  "      return href.includes(orderId) && (/(?:\\/your-orders\\/order-details|order-details|orderdetails)/i.test(href) || /view\\s+order\\s+details/i.test(text));",
+                  "      return href.includes(orderId) && (/(?:\\/your-orders\\/order-details|\\/gp\\/your-account\\/order-details|\\/gp\\/css\\/summary\\/edit\\.html|order-details|orderdetails)/i.test(href) || /view\\s+order\\s+details/i.test(text));"
+              )
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'parser legacy classification fragment not found: {old}')
+              text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8')
+          PY
       - name: Validate generated source
         run: |
           node --check parser.js
