@@ -163,6 +163,8 @@ function defaultState() {
       manualStop: false, lastResumeAt: null, lastResumeSource: null, resumeCount: 0,
       resumePageKey: null, resumeExpectedFingerprint: null, resumeObservedFingerprint: null,
       resumeFingerprintMatched: null, lastRecoveredJobKey: null, lastResumeOverlapError: null,
+      sessionId: null, sessionStartedAt: null, sessionSource: null, sessionKnownRefreshCount: 0, sessionKnownRefreshFailures: 0,
+      sessionSeenPages: {}, priorFrontier: null,
       lastMigrationAt: null, lastMigrationFrom: null, lastMigrationTo: null
     }
   };
@@ -182,9 +184,12 @@ function ensureCrawl(state) {
   state.crawl.seenPages = state.crawl.seenPages || {};
   state.crawl.completedOrders = state.crawl.completedOrders || {};
   state.crawl.overlapRefreshedOrders = state.crawl.overlapRefreshedOrders || {};
+  state.crawl.sessionSeenPages = state.crawl.sessionSeenPages || {};
   state.crawl.overlapExamples = Array.isArray(state.crawl.overlapExamples) ? state.crawl.overlapExamples.slice(-50) : [];
   state.crawl.manualStop = Boolean(state.crawl.manualStop);
   state.crawl.resumeCount = Number.isFinite(Number(state.crawl.resumeCount)) ? Number(state.crawl.resumeCount) : 0;
+  state.crawl.sessionKnownRefreshCount = Number.isFinite(Number(state.crawl.sessionKnownRefreshCount)) ? Number(state.crawl.sessionKnownRefreshCount) : 0;
+  state.crawl.sessionKnownRefreshFailures = Number.isFinite(Number(state.crawl.sessionKnownRefreshFailures)) ? Number(state.crawl.sessionKnownRefreshFailures) : 0;
   return state;
 }
 
@@ -491,6 +496,8 @@ async function queueManagedHistoryResult(result, job) {
   crawl.currentPageCompleted = 0;
   const pageKey = `${year}:${page}`;
   const fingerprint = pageOrderIds.join('|');
+  crawl.sessionSeenPages = crawl.sessionSeenPages || {};
+  if (crawl.sessionId && crawl.sessionSeenPages[pageKey] !== fingerprint) crawl.sessionSeenPages[pageKey] = fingerprint;
   const previousFingerprint = crawl.seenPages[pageKey];
   if (job?.resumeRecovery) {
     crawl.resumePageKey = pageKey;
@@ -535,17 +542,15 @@ async function queueManagedHistoryResult(result, job) {
     seq += 1;
     const firstSeen = crawl.seenOrders?.[link.orderId] || null;
     const alreadyComplete = Boolean(crawl.completedOrders[link.orderId]);
-    const crossPageOverlap = Boolean(alreadyComplete && firstSeen?.pageKey && firstSeen.pageKey !== pageKey);
-    const resumeDuplicate = Boolean(alreadyComplete && job?.resumeRecovery);
-    const ledgerAdopted = Boolean(alreadyComplete && crawl.completedOrders[link.orderId]?.adoptedFromLedger);
     if (alreadyComplete) {
-      // A known Order ID is an anchor, not a reason to restart history. Refresh it once when it
-      // proves the recovered/shifted page overlaps prior work, then continue without incrementing
-      // lifetime completion or repeatedly hitting the same order during fallback navigation.
-      if ((resumeDuplicate || crossPageOverlap || ledgerAdopted) && !crawl.overlapRefreshedOrders[link.orderId]) {
+      // Every new scanner session deliberately starts from the newest order. Known complete IDs are
+      // refreshed exactly once in that session so returns/replacements/refund state can advance,
+      // but the global unique-order completion set is never incremented again.
+      if (!crawl.overlapRefreshedOrders[link.orderId]) {
         const refreshJob = {
           type: 'detail', orderId: link.orderId, url: normalizeUrl(link.url) || link.url,
-          source: `resume-overlap ${pageKey}`, crawlManaged: true, resumeOverlapRefresh: true,
+          source: `session-known-refresh ${pageKey}`, crawlManaged: true, resumeOverlapRefresh: true,
+          scanSessionId: crawl.sessionId || job?.scanSessionId || null,
           crawlYear: year, crawlPage: page, crawlPageKey: pageKey, historyUrl: crawl.currentHistoryUrl,
           sequence: seq, priority: 5, queuedAt: nowIso(), attempts: 0
         };
@@ -557,7 +562,7 @@ async function queueManagedHistoryResult(result, job) {
     }
     const detailJob = {
       type: 'detail', orderId: link.orderId, url: normalizeUrl(link.url) || link.url,
-      source: `crawl ${pageKey}`, crawlManaged: true, crawlYear: year, crawlPage: page,
+      source: `crawl ${pageKey}`, crawlManaged: true, scanSessionId: crawl.sessionId || job?.scanSessionId || null, crawlYear: year, crawlPage: page,
       crawlPageKey: pageKey, historyUrl: crawl.currentHistoryUrl, sequence: seq,
       priority: 5, queuedAt: nowIso(), attempts: 0
     };
@@ -567,7 +572,7 @@ async function queueManagedHistoryResult(result, job) {
 
   const advanceJob = {
     type: 'advance', url: crawl.currentHistoryUrl, source: `crawl ${pageKey}`, crawlManaged: true,
-    crawlYear: year, crawlPage: page, crawlPageKey: pageKey, pageOrderIds,
+    scanSessionId: crawl.sessionId || job?.scanSessionId || null, crawlYear: year, crawlPage: page, crawlPageKey: pageKey, pageOrderIds,
     historyUrl: crawl.currentHistoryUrl, priority: 20, queuedAt: nowIso(), attempts: 0
   };
   const advanceKey = `advance:${pageKey}`;
@@ -581,6 +586,81 @@ async function queueManagedHistoryResult(result, job) {
   return { year, page, pageOrderIds };
 }
 
+
+function makeScanSessionId() {
+  return `scan-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function deeperHistoricalFrontier(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  const ay = Number(a.year), by = Number(b.year);
+  if (Number.isFinite(ay) && Number.isFinite(by) && ay !== by) return ay < by ? a : b;
+  const ap = Math.max(1, Number(a.page) || 1), bp = Math.max(1, Number(b.page) || 1);
+  return ap >= bp ? a : b;
+}
+
+function snapshotHistoricalFrontier(crawl) {
+  const previous = crawl?.priorFrontier || null;
+  if (!crawl?.currentYear) return previous;
+  const current = {
+    capturedAt: nowIso(),
+    year: Number(crawl.currentYear),
+    page: Math.max(1, Number(crawl.currentPage) || 1),
+    pageKey: `${Number(crawl.currentYear)}:${Math.max(1, Number(crawl.currentPage) || 1)}`,
+    historyUrl: crawl.currentHistoryUrl || null,
+    ordersCompleted: Object.keys(crawl.completedOrders || {}).length,
+    lastCompletedOrderId: crawl.lastCompletedOrderId || null
+  };
+  return deeperHistoricalFrontier(current, previous);
+}
+
+function beginNewestScanSession(state, source = 'manual-resume', startYear = null) {
+  state = ensureCrawl(state);
+  const prior = state.crawl;
+  const now = nowIso();
+  const year = Number(startYear) || new Date().getFullYear();
+  const sessionId = makeScanSessionId();
+  const priorFrontier = snapshotHistoricalFrontier(prior);
+  const years = Array.from(new Set([year, ...(prior.years || [])].map(Number).filter(Number.isFinite))).sort((a,b) => b-a);
+
+  state.queue = [];
+  state.currentJob = null;
+  state.paused = false;
+  state.running = true;
+  state.lastError = null;
+  state.lastHistoryAdvanceError = null;
+  state.crawl = {
+    ...prior,
+    active: true,
+    phase: 'history',
+    years,
+    completedYears: [],
+    currentYear: year,
+    currentPage: 1,
+    currentHistoryUrl: buildHistoryUrl('https://www.amazon.com/gp/your-account/order-history', year, 1),
+    currentPageOrderIds: [],
+    currentPageCompleted: 0,
+    completedAt: null,
+    manualStop: false,
+    overlapRefreshedOrders: {},
+    sessionSeenPages: {},
+    sessionId,
+    sessionStartedAt: now,
+    sessionSource: source,
+    sessionKnownRefreshCount: 0,
+    sessionKnownRefreshFailures: 0,
+    priorFrontier,
+    startedAt: prior.startedAt || now
+  };
+  state.crawl.ordersCompleted = Object.keys(state.crawl.completedOrders || {}).length;
+  state.queue.push({
+    type: 'history', url: state.crawl.currentHistoryUrl, historyYear: year, historyPage: 1,
+    crawlManaged: true, scanSessionId: sessionId, sessionPass: true,
+    source: `newest-session:${source}`, priority: 1, queuedAt: now, attempts: 0
+  });
+  return state;
+}
 
 function crawlCheckpointPageKey(crawl) {
   const year = Number(crawl?.currentYear);
@@ -664,57 +744,17 @@ async function handleAmazonUserPageReady(sender) {
 
 async function startOrResumeFullScan({ restart = false, startYear = null, source = 'manual' } = {}) {
   let state = ensureCrawl(await getState());
-  if (!restart && state.crawl.active) {
-    if (source === 'auto-amazon' && state.crawl.manualStop) return state;
-    // In the same live service worker, an in-memory processing=true means currentJob is genuinely
-    // in flight. Resume must not reinterpret it as stale. If the user manually resumes immediately
-    // after Stop, clear the latch and let that live job finish; its normal completion will schedule
-    // the next job. After a browser/service-worker restart processing is false, so persisted
-    // currentJob recovery still works exactly as intended.
-    if (processing) {
-      if (source !== 'auto-amazon') {
-        state.paused = false;
-        state.running = true;
-        state.crawl.manualStop = false;
-        state.crawl.lastResumeAt = nowIso();
-        state.crawl.lastResumeSource = source;
-        state.crawl.resumeCount = Number(state.crawl.resumeCount || 0) + 1;
-        await setState(state);
-      }
-      return state;
-    }
-    const alreadyRunning = !state.paused && state.running && !state.currentJob && state.queue.length > 0;
-    if (source === 'auto-amazon' && alreadyRunning) return state;
-    state = reconstructActiveCrawl(state, source, { clearManualStop: source !== 'auto-amazon' });
-    await setState(state);
-    if (state.queue.length) scheduleSoon(randomBetween(250, 700));
-    return state;
-  }
-  if (!restart && source === 'auto-amazon' && state.crawl.phase === 'done') return state;
+  if (source === 'auto-amazon' && state.crawl.manualStop) return state;
 
-  const year = Number(startYear) || new Date().getFullYear();
-  state.queue = [];
-  state.currentJob = null;
-  state.paused = false;
-  state.running = true;
-  state.lastError = null;
-  state.lastHistoryAdvanceError = null;
-  state.crawl = {
-    ...defaultState().crawl,
-    active: true,
-    phase: 'history',
-    years: [year],
-    currentYear: year,
-    currentPage: 1,
-    currentHistoryUrl: buildHistoryUrl('https://www.amazon.com/gp/your-account/order-history', year, 1),
-    startedAt: nowIso(),
-    manualStop: false,
-    lastResumeSource: source
-  };
-  state.queue.push({
-    type: 'history', url: state.crawl.currentHistoryUrl, historyYear: year, historyPage: 1,
-    crawlManaged: true, source: 'full-lifetime-scan', priority: 1, queuedAt: nowIso(), attempts: 0
-  });
+  // Start while an existing pass is genuinely running is a no-op. A user Stop followed by Start,
+  // an inactive completed/idle scanner, Auto-start beginning new work, or explicit Restart all
+  // create a NEW pass from the newest order. Service-worker/browser recovery uses
+  // resumePersistedCrawl() instead and therefore does not rewind the same live pass repeatedly.
+  const livePass = state.crawl.active && !state.paused && (processing || state.running || Boolean(state.currentJob) || state.queue.length > 0);
+  if (!restart && livePass) return state;
+  if (processing) return state;
+
+  state = beginNewestScanSession(state, source, startYear);
   await setState(state);
   scheduleSoon(randomBetween(300, 900));
   return state;
@@ -742,7 +782,7 @@ async function queueNextYear(currentYear) {
   crawl.phase = 'history';
   state.queue.push({
     type: 'history', url: crawl.currentHistoryUrl, historyYear: nextYear, historyPage: 1,
-    crawlManaged: true, source: 'next-year', priority: 1, queuedAt: nowIso(), attempts: 0
+    crawlManaged: true, scanSessionId: crawl.sessionId || null, sessionPass: true, source: 'next-year', priority: 1, queuedAt: nowIso(), attempts: 0
   });
   sortQueue(state.queue);
   await setState(state);
@@ -1385,6 +1425,7 @@ async function runJob(job) {
       historyYear: job.crawlYear,
       historyPage: nextPage,
       crawlManaged: true,
+      scanSessionId: job.scanSessionId || null, sessionPass: true,
       source: 'verified-next-page'
     });
     await broadcastLedgerUpdate(advanced.nextResult.save);
@@ -1553,6 +1594,7 @@ async function processNextJob() {
       completionState.lastError = jobError;
     } else if (jobError && job.resumeOverlapRefresh) {
       completionState.crawl.lastResumeOverlapError = jobError;
+      completionState.crawl.sessionKnownRefreshFailures = Number(completionState.crawl.sessionKnownRefreshFailures || 0) + 1;
     }
 
     const managedRetry = !job.resumeOverlapRefresh && job.crawlManaged && !blocked && !rateLimited && !success && (job.type === 'detail' || job.type === 'advance' || job.type === 'history');
@@ -1594,6 +1636,7 @@ async function processNextJob() {
       completionState.detailProcessed += 1;
       if (job.crawlManaged) {
         const crawl = completionState.crawl;
+        if (job.resumeOverlapRefresh) crawl.sessionKnownRefreshCount = Number(crawl.sessionKnownRefreshCount || 0) + 1;
         if (!crawl.completedOrders[job.orderId]) {
           crawl.completedOrders[job.orderId] = { at: nowIso(), year: job.crawlYear, page: job.crawlPage };
           crawl.ordersCompleted = (crawl.ordersCompleted || 0) + 1;

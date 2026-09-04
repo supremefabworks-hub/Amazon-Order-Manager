@@ -166,8 +166,17 @@ assert(backgroundSourceV01814.includes("tab.active !== true") && backgroundSourc
 assert(backgroundSourceV01814.includes('state.crawl.manualStop'), 'Auto-start must respect explicit manual Stop latch');
 assert(backgroundSourceV01814.includes("resumePersistedCrawl('browser-startup')") && backgroundSourceV01814.includes("resumePersistedCrawl('version-update')"), 'browser/update startup must resume persisted active crawl');
 assert(backgroundSourceV01814.includes('RATE_LIMIT_COOLDOWN_MIN_MS = 10 * 60 * 1000') && backgroundSourceV01814.includes('RATE_LIMIT_COOLDOWN_MAX_MS = 20 * 60 * 1000'), 'v0.18.14 must preserve rate-limit cooldown safety');
-assert(backgroundSourceV01814.includes("ignored: 'crawler-already-processing'") && backgroundSourceV01814.includes('if (processing) {') && backgroundSourceV01814.includes("if (source !== 'auto-amazon')"), 'Auto-start/manual resume must not requeue an in-flight currentJob in the same service worker');
+assert(backgroundSourceV01814.includes("ignored: 'crawler-already-processing'") && backgroundSourceV01814.includes('const livePass =') && backgroundSourceV01814.includes('if (!restart && livePass) return state;'), 'Auto-start/manual Start must not create a second session while a pass is already live');
 assert(backgroundSourceV01814.includes('const staleWorkerTabId = data[WORKER_TAB_KEY]') && backgroundSourceV01814.includes('await chrome.tabs.remove(staleWorkerTabId)'), 'version migration must close an orphaned old worker tab before clearing its transient identity');
 assert(backgroundSourceV01814.includes('adoptedFromLedger: true') && backgroundSourceV01814.includes("source: 'stored-canonical-detail-url'"), 'durable ledger must serve as a secondary completion/detail-URL recovery index');
-assert(backgroundSourceV01814.includes("if (processing) {") && backgroundSourceV01814.includes("if (source !== 'auto-amazon')"), 'manual Resume during an in-flight job must clear Stop without requeueing the live currentJob');
+assert(backgroundSourceV01814.includes('const livePass =') && backgroundSourceV01814.includes('if (processing) return state;'), 'newest-session Start must not race or replace an in-flight currentJob in the same service worker');
 console.log('v0.18.14 durable resume/autostart background regressions passed');
+
+
+const backgroundV01815 = fs.readFileSync(__dirname + '/background.js', 'utf8');
+assert(backgroundV01815.includes('function beginNewestScanSession'), 'v0.18.15 must have a dedicated newest-session initializer');
+assert(backgroundV01815.includes("currentPage: 1") && backgroundV01815.includes('priorFrontier'), 'new sessions must begin page 1 while preserving prior frontier');
+assert(backgroundV01815.includes('overlapRefreshedOrders: {}'), 'new sessions must reset only per-session known-order refresh markers');
+assert(backgroundV01815.includes('sessionKnownRefreshCount'), 'known-order refresh progress must be observable per session');
+assert(backgroundV01815.includes('resumePersistedCrawl'), 'same-session service-worker recovery must remain checkpoint-based');
+console.log('v0.18.15 newest-session background regressions passed');

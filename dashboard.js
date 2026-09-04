@@ -495,9 +495,11 @@
       const pageCount = (crawl.currentPageOrderIds || []).length;
       const doneOnPage = crawl.currentPageCompleted || 0;
       const yearsDone = (crawl.completedYears || []).length ? ` · completed years ${(crawl.completedYears || []).join(', ')}` : '';
-      const resumeInfo = crawl.lastResumeAt ? ` · resume #${crawl.resumeCount || 1} from ${crawl.resumePageKey || `${crawl.currentYear}:${crawl.currentPage || 1}`} (${crawl.lastResumeSource || 'resume'})` : '';
+      const recoveryInfo = crawl.lastResumeAt ? ` · worker recovery #${crawl.resumeCount || 1} (${crawl.lastResumeSource || 'recovery'})` : '';
+      const sessionInfo = crawl.sessionStartedAt ? ` · session ${crawl.sessionSource || 'scan'} · ${crawl.sessionKnownRefreshCount || 0} known orders refreshed${crawl.sessionKnownRefreshFailures ? ` · ${crawl.sessionKnownRefreshFailures} refresh failures` : ''}` : '';
+      const frontierInfo = crawl.priorFrontier?.pageKey ? ` · previous frontier ${crawl.priorFrontier.pageKey}` : '';
       scannerCheckpoint.textContent = crawl.currentYear
-        ? `Checkpoint: ${crawl.currentYear} page ${crawl.currentPage || 1} · ${doneOnPage}/${pageCount || '?'} details complete · ${crawl.ordersCompleted || 0} unique orders completed · ${crawl.overlapCount || 0} overlapping history hits${crawl.lastCompletedOrderId ? ` · last ${crawl.lastCompletedOrderId}` : ''}${resumeInfo}${yearsDone}`
+        ? `Current pass: ${crawl.currentYear} page ${crawl.currentPage || 1} · ${doneOnPage}/${pageCount || '?'} details complete · ${crawl.ordersCompleted || 0} unique orders stored · ${crawl.overlapCount || 0} overlapping history hits${crawl.lastCompletedOrderId ? ` · last ${crawl.lastCompletedOrderId}` : ''}${sessionInfo}${frontierInfo}${recoveryInfo}${yearsDone}`
         : `Checkpoint: no lifetime scan started · ${crawl.overlapCount || 0} overlaps recorded`;
     } catch (error) {
       scannerStatus.textContent = `Status unavailable: ${error?.message || error}`;
@@ -566,7 +568,7 @@
     await chrome.runtime.sendMessage({ type: 'ARL_STOP_FULL_SCAN' }); await renderScannerStatus();
   });
   document.getElementById('restartScanner').addEventListener('click', async () => {
-    if (!confirm('Restart the lifetime history scan from the current year? Existing ledger data will be kept.')) return;
+    if (!confirm('Start a fresh pass from the newest Amazon order now? Existing ledger and historical progress will be kept.')) return;
     await chrome.runtime.sendMessage({ type: 'ARL_START_FULL_SCAN', restart: true }); await renderScannerStatus();
   });
 
