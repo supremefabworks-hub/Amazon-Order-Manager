@@ -1,0 +1,35 @@
+name: Validate v0.18.7 review hardening
+on:
+  push:
+    branches: [v0187-item-status-and-milestones]
+    paths:
+      - '.github/workflows/harden-v0187.yml'
+permissions:
+  contents: write
+jobs:
+  harden:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0187-item-status-and-milestones
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply review hardening
+        run: python3 tools/harden_v0187.py
+      - name: Validate
+        run: |
+          node --check parser.js
+          node --check storage.js
+          node --check item-model.js
+          node --check dashboard.js
+          npm test
+      - name: Commit durable hardening and remove temporary machinery
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f tools/harden_v0187.py .github/workflows/harden-v0187.yml
+          git add -A
+          git commit -m 'Harden v0.18.7 unmatched-item accounting and milestone evidence [v0187-review]'
+          git push origin HEAD:v0187-item-status-and-milestones
