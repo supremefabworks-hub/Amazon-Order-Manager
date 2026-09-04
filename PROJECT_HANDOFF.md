@@ -4,10 +4,17 @@
 
 Chrome Manifest V3 Amazon / Amazon Business Order Manager and Refund Ledger.
 
-**Current source baseline: v0.18.2 after PR #16 merges.** Root source remains the active development source. The exact pre-GitHub v0.16.0 archive under `source-snapshots/v0.16.0/full/` is historical recovery material only.
+**Current source baseline: v0.18.3 candidate for Issue #17.** Root source remains the active development source. The exact pre-GitHub v0.16.0 archive under `source-snapshots/v0.16.0/full/` is historical recovery material only.
 
 v0.18 preserves the complete v0.17 Amazon crawler/details/returns/dashboard contract and adds a verified Windows development auto-update channel.
 
+
+
+## v0.18.3 live acceptance fixes
+
+Issue #17 captures the next live defects from v0.18.2. The strict crawler now accepts Amazon-supplied legacy `/gp/css/summary/edit.html?orderID=...` as a real detail route while continuing to forbid synthesized URLs; a genuine missing link names its exact Order ID. Return identity uses stable `returnItemId` as the binding, preserves exact Order Details titles, and only flags identity conflict for contradictory non-empty ASIN evidence. Dashboard child-return item text is sourced from trusted Order Details bindings when available. `extractStatusText` is now stage-aware, so static `Refund issued` timeline labels cannot advertise a refund milestone that `parseReturnMilestones` has not affirmatively proven. Badge wrapping prevents long review labels from overlapping the order column.
+
+v0.18.3 must be used to prove unattended update from repaired v0.18.2; no manual extension reload/replacement is allowed for that acceptance.
 
 ## v0.18.2 live multi-return + updater reliability release
 

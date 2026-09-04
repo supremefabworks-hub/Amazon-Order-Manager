@@ -2,7 +2,7 @@
 
 ## Current test target
 
-**v0.18.2** is the current source baseline after PR #16 release merge. It preserves the v0.17 Amazon crawler/return contract, retains the verified local development auto-update channel, and fixes the live false payment-card last-four contamination found in v0.18.0.
+**v0.18.3** is the current live-fix target for Issue #17. It preserves the v0.17 Amazon crawler/return contract, retains the verified local development auto-update channel, and fixes the live false payment-card last-four contamination found in v0.18.0.
 
 Two independent live boundaries remain:
 
@@ -239,3 +239,12 @@ For a returned order and an ordinary order:
 ## Release decision
 
 A user-testable development build may merge only after `npm test` and PR CI pass. Every such build requires a strictly newer manifest/package version. Issue #7 remains open until live Amazon Business acceptance passes. Issue #10 remains open until the Windows bootstrap and a later real automatic update both pass.
+
+
+### v0.18.3 focused live checks
+
+- Resume the 2026 crawl at the page-6 boundary. A captured `/gp/css/summary/edit.html?orderID=...` detail link must be processed; if a link is truly absent, the stop message must name the exact Order ID.
+- Same-return verbose title differences with the same `itemId` must not produce `Item needs review` unless non-empty ASIN evidence contradicts.
+- A bare static `Refund issued` timeline label must not make the order/return status say Refund issued; affirmative Amazon issuance prose must still do so.
+- Long review/status badges must wrap without overlapping the Order ID.
+- Leave v0.18.2 installed and do not manually reload/replace it after `dev-v0.18.3` publishes; confirm Chrome advances to v0.18.3 through the native updater.

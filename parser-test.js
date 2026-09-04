@@ -498,3 +498,28 @@ assert(p.makeRecordId(itemA) !== p.makeRecordId(itemB), 'multiple returned items
 assert(p.isCompleteCanonicalDetail({ recordType:'order', orderId:'114-3333333-4444444', orderDetailsUrl:'https://www.amazon.com/your-orders/order-details?orderID=114-3333333-4444444', orderDate:'Sep 1, 2026', purchaseAmount:20, itemNames:['Widget'] }, 'https://www.amazon.com/your-orders/order-details?orderID=114-3333333-4444444') === true, 'complete canonical detail should require real URL/date/total/item');
 assert(p.isCompleteCanonicalDetail({ recordType:'order', orderId:'114-3333333-4444444', orderDetailsUrl:'https://www.amazon.com/your-orders/order-details?orderID=114-3333333-4444444', orderDate:'Sep 1, 2026', purchaseAmount:20, itemNames:[] }, 'https://www.amazon.com/your-orders/order-details?orderID=114-3333333-4444444') === false, 'detail page without item capture must not be Detailed');
 console.log('v0.17 parser regressions passed');
+
+
+// v0.18.3 live acceptance regressions
+assert(p.isOrderDetailPage('https://www.amazon.com/gp/css/summary/edit.html?orderID=113-1234567-7654321') === true, 'captured legacy /gp/css/summary/edit.html must be recognized as an Order Details page');
+const legacyDetailAnchor = {
+  innerText: 'View order details', textContent: 'View order details', parentElement: null,
+  href: 'https://www.amazon.com/gp/css/summary/edit.html?orderID=113-1234567-7654321',
+  getAttribute(name) { return name === 'href' ? '/gp/css/summary/edit.html?orderID=113-1234567-7654321' : null; }
+};
+const legacyDetailDoc = {
+  body: { innerText: 'Order # 113-1234567-7654321', textContent: '' },
+  querySelectorAll(selector) { return selector === 'a[href]' ? [legacyDetailAnchor] : []; },
+  querySelector() { return null; }
+};
+const legacyLinks = p.extractOrderDetailLinks(legacyDetailDoc, 'https://www.amazon.com/gp/your-account/order-history');
+assert(legacyLinks.length === 1 && legacyLinks[0].orderId === '113-1234567-7654321', 'real captured legacy Order Details href must be preserved');
+assert(legacyLinks[0].url.includes('/gp/css/summary/edit.html'), 'legacy detail discovery must preserve Amazon supplied href');
+
+const staticRefundTimeline = p.parseTextRecord('Return started\nInitiated\nDropped off\nRefund issued\nCredit pending', '113-2222222-3333333', { pageType: 'return', forceRecordType: 'return' });
+assert(staticRefundTimeline.returnStage !== 'refund_issued', 'bare Refund issued timeline label must not promote lifecycle');
+assert(!/refund issued/i.test(staticRefundTimeline.statusText || ''), 'bare Refund issued timeline label must not leak into affirmative status text');
+const affirmativeRefund = p.parseTextRecord('Return complete\nYour refund has been issued.\nRefund issued', '113-2222222-3333334', { pageType: 'return', forceRecordType: 'return' });
+assert(affirmativeRefund.returnStage === 'refund_issued', 'affirmative refund-issued sentence must still promote lifecycle');
+assert(/refund has been issued/i.test(affirmativeRefund.statusText || ''), 'affirmative refund-issued sentence must remain visible status evidence');
+console.log('v0.18.3 parser live regressions passed');

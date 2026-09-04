@@ -115,7 +115,7 @@
     const item = record.itemNames?.[0] || `Return for order ${record.orderId}`;
     const amount = Number.isFinite(Number(record.refundAmount)) ? `$${Number(record.refundAmount).toFixed(2)}` : '';
     const expectedCredit = !progress.credited ? (record.expectedCreditDate || record?.returnMilestones?.expectedCreditDate || '') : '';
-    const orderDetailsUrl = record.orderDetailsUrl && /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|order-details)/i.test(record.orderDetailsUrl) ? record.orderDetailsUrl : '';
+    const orderDetailsUrl = record.orderDetailsUrl && /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html|order-details)/i.test(record.orderDetailsUrl) ? record.orderDetailsUrl : '';
     const steps = [
       ['started', 'Initiated', progress.started, milestoneDate(record, 'started')],
       ['shipped', 'Dropped off', progress.shippedOrReceived, milestoneDate(record, 'shipped')],
@@ -301,7 +301,7 @@
         } catch (_) {
           return { ok: false, error: 'Invalid Order Details URL.' };
         }
-        if (!/(^|\.)amazon\.com$/i.test(url.hostname) || !/(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|order-details)/i.test(url.pathname)) {
+        if (!/(^|\.)amazon\.com$/i.test(url.hostname) || !/(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html|order-details)/i.test(url.pathname)) {
           return { ok: false, error: 'The requested page is not an Amazon Order Details page.' };
         }
 

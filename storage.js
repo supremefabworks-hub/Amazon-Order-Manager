@@ -177,25 +177,26 @@
   }
 
   function trustedReturnIdentityDecision(existing, incoming) {
-    const none = { bound: false, preserve: false, conflict: false };
+    const none = { bound: false, preserveNames: false, preserveAsins: false, conflict: false };
     if (existing?.recordType !== 'return' || incoming?.recordType !== 'return') return none;
     if (existing.itemIdentitySource !== 'order-detail-return-link') return none;
     if (!existing.returnItemId || !incoming.returnItemId || existing.returnItemId !== incoming.returnItemId) return none;
 
     const existingAsins = new Set((existing.asins || []).map(value => String(value || '').toUpperCase()).filter(Boolean));
     const incomingAsins = new Set((incoming.asins || []).map(value => String(value || '').toUpperCase()).filter(Boolean));
-    const existingNames = new Set((existing.itemNames || []).map(value => String(value || '').trim().toLowerCase()).filter(Boolean));
-    const incomingNames = new Set((incoming.itemNames || []).map(value => String(value || '').trim().toLowerCase()).filter(Boolean));
+    let asinConflict = false;
+    if (existingAsins.size && incomingAsins.size) {
+      let overlap = false;
+      for (const asin of existingAsins) if (incomingAsins.has(asin)) overlap = true;
+      asinConflict = !overlap;
+    }
 
-    if (incomingAsins.size) {
-      for (const asin of existingAsins) if (incomingAsins.has(asin)) return { bound: true, preserve: false, conflict: false };
-      if (existingAsins.size) return { bound: true, preserve: true, conflict: true };
-    }
-    if (incomingNames.size) {
-      for (const name of existingNames) if (incomingNames.has(name)) return { bound: true, preserve: true, conflict: false };
-      if (existingNames.size) return { bound: true, preserve: true, conflict: true };
-    }
-    return { bound: true, preserve: true, conflict: false };
+    return {
+      bound: true,
+      preserveNames: true,
+      preserveAsins: existingAsins.size > 0,
+      conflict: asinConflict
+    };
   }
 
   function mergeRecord(existing, incoming, scannedAt) {
@@ -212,7 +213,7 @@
       if (wouldRegressReturn && ['returnStage', 'status', 'statusText'].includes(key)) continue;
       if (key === 'status' && incomingStatusRank < existingStatusRank) continue;
       if (Array.isArray(value)) {
-        if (trustedIdentity.preserve && ['itemNames', 'asins'].includes(key)) {
+        if ((key === 'itemNames' && trustedIdentity.preserveNames) || (key === 'asins' && trustedIdentity.preserveAsins)) {
           merged[key] = mergeArray([], existing?.[key] || []);
         } else if (incoming?.recordType === 'return' && incoming?.authoritativeReturnCapture && ['itemNames', 'asins'].includes(key)) merged[key] = mergeArray([], value);
         else merged[key] = mergeArray(existing?.[key], value);

@@ -1,6 +1,6 @@
 {
   "name": "amazon-order-manager",
-  "version": "0.18.2",
+  "version": "0.18.3",
   "private": true,
   "description": "Amazon / Amazon Business explicit multi-return order and refund tracking Chrome extension with verified development auto-updates",
   "scripts": {
