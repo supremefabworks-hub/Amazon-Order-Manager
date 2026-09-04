@@ -16,14 +16,13 @@
   const navAllCount = document.getElementById('navAllCount');
   const navReturnCount = document.getElementById('navReturnCount');
   const navReviewCount = document.getElementById('navReviewCount');
-  const navProcessingCount = document.getElementById('navProcessingCount');
   const navErrorCount = document.getElementById('navErrorCount');
   const bankBridgeStatus = document.getElementById('bankBridgeStatus');
   const bankResultFile = document.getElementById('bankResultFile');
   let ledger = [];
   let settings = storage.DEFAULT_SETTINGS;
   let currentView = new URLSearchParams(location.search).get('view') || 'all';
-  if (!['all', 'returns', 'needs_review', 'processing', 'errors'].includes(currentView)) currentView = 'all';
+  if (!['all', 'returns', 'needs_review', 'errors'].includes(currentView)) currentView = 'all';
 
   function esc(value) {
     return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
@@ -346,7 +345,6 @@
       if (currentView === 'all' && !row.dataComplete) return false;
       if (currentView === 'returns' && (!row.dataComplete || !row.hasReturn)) return false;
       if (currentView === 'needs_review' && (!row.dataComplete || !row.needsReview)) return false;
-      if (currentView === 'processing' && (row.dataComplete || row.processingError)) return false;
       if (currentView === 'errors' && !row.processingError) return false;
       if (selectedYear !== 'all' && row.orderYear !== selectedYear) return false;
       if (cardFilter?.value !== 'all' && String(row.cardLast4 || '') !== selectedCard) return false;
@@ -376,25 +374,20 @@
   function renderStats() {
     const allRows = buildRows();
     const rows = allRows.filter(r => r.dataComplete);
-    const processingRows = allRows.filter(r => !r.dataComplete && !r.processingError);
     const errorRows = allRows.filter(r => Boolean(r.processingError));
     const returnRows = rows.filter(r => r.hasReturn);
     const reviewRows = rows.filter(r => r.needsReview);
-    const detailed = rows.filter(r => r.detailComplete);
     const issued = rows.filter(r => r.hasReturn && r.returns.every(ret => storage.returnStageRank(ret) >= storage.RETURN_STAGE_RANK.refund_issued));
     const bankCredited = rows.filter(r => r.hasReturn && r.returns.every(ret => storage.isBankCreditConfirmed(ret)));
     const reviewExpectedTotal = reviewRows.reduce((total, row) => total + needsReviewExpectedAmount(row), 0);
     navAllCount.textContent = String(rows.length);
     navReturnCount.textContent = String(returnRows.length);
     navReviewCount.textContent = String(reviewRows.length);
-    navProcessingCount.textContent = String(processingRows.length);
     navErrorCount.textContent = String(errorRows.length);
     stats.innerHTML = `
-      <div class="stat"><span>Complete orders</span><strong>${rows.length}</strong><small>${money(sum(rows, 'orderTotal'))} captured order total</small></div>
-      <div class="stat"><span>Order details</span><strong>${detailed.length}</strong><small>Fully processed canonical orders</small></div>
+      <div class="stat"><span>Complete orders</span><strong>${rows.length}</strong><small>${money(sum(rows, 'orderTotal'))} captured order total · fully processed canonical orders</small></div>
       <div class="stat"><span>Returns</span><strong>${returnRows.length}</strong><small>${money(sum(returnRows, 'refundAmount'))} expected refunds</small></div>
-      <div class="stat stat-review-total"><span>Needs review</span><strong>${money(reviewExpectedTotal)}</strong><small>${reviewRows.length} flagged ${reviewRows.length === 1 ? 'order' : 'orders'}</small></div>
-      <div class="stat"><span>Processing</span><strong>${processingRows.length}</strong><small>Hidden from completed ledger</small></div>
+      <div class="stat stat-review-total"><span>Return review</span><strong>${money(reviewExpectedTotal)}</strong><small>${reviewRows.length} flagged ${reviewRows.length === 1 ? 'order' : 'orders'}</small></div>
       <div class="stat"><span>Errors</span><strong>${errorRows.length}</strong><small>Require retry or investigation</small></div>`;
   }
 
@@ -405,7 +398,7 @@
   function badgeLabel(row) {
     if (row.stateKey === 'purchase') return row.detailComplete ? 'Order' : 'Order queued';
     if (row.stateKey === 'cancelled') return 'Cancelled';
-    if (row.stateKey === 'needs_review') return row.statusLabel || 'Needs review';
+    if (row.stateKey === 'needs_review') return row.statusLabel || 'Return review';
     if (row.stateKey === 'refund_issued') return 'Refund issued';
     if (row.stateKey === 'credited') return 'Amazon credited';
     if (row.stateKey === 'reconciled') return 'Reconciled';
@@ -484,7 +477,7 @@
     render();
   }
   function setView(view) {
-    if (!['all', 'returns', 'needs_review', 'processing', 'errors'].includes(view)) return;
+    if (!['all', 'returns', 'needs_review', 'errors'].includes(view)) return;
     currentView = view;
     const url = new URL(location.href); url.searchParams.set('view', view); history.replaceState(null, '', url.toString());
     render();

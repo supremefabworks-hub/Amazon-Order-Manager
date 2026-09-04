@@ -135,3 +135,6 @@ Amazon return lifecycle and bank credit verification are independent. Render fiv
 
 ### v0.18.9 durable addition
 Normal ledger views are complete-only: canonical Order Details plus all discovered return-status children must finish before an order appears. Processing and Errors isolate partial/failed orders. Detached return HTML checkmark count is never completion evidence; checkmarks must be structurally bound/non-hidden and cannot outrank affirmative Amazon lifecycle prose. Completed return displays prefer authoritative return captures. Dashboard supports search plus status/year/card filtering and sort controls. Issue #29 tracks live acceptance.
+
+
+Current UI cleanup baseline: v0.18.10 / Issue #31 consolidates Complete orders + Order details and removes the user-facing Processing tab. Processing remains internal; navigation is Orders, Returns, Return review, Errors.
