@@ -292,6 +292,7 @@
       expectedCreditDate,
       started: { done: started, date: started ? findMilestoneDate(normalized, ['Initiated', 'Return initiated', 'Return started']) : null },
       shipped: { done: shipped, date: shipped ? findMilestoneDate(normalized, ['Dropped off', 'Drop off', 'Return shipped', 'Shipped']) : null },
+      received: { done: received, date: received ? findMilestoneDate(normalized, ['Return received', 'Received']) : null },
       refundIssued: { done: refundIssued, date: refundIssued ? findMilestoneDate(normalized, ['Refund issued']) : null },
       credited: { done: credited, date: credited ? findMilestoneDate(normalized, ['Refund credited', 'Credited']) : null }
     };
@@ -301,9 +302,8 @@
     const done = { started: false, shipped: false, received: false, refundIssued: false, credited: false };
     if (!container?.querySelectorAll) return done;
     let checks = [];
-    try {
-      checks = Array.from(container.querySelectorAll('img[src*="milestone_checkmark" i], img[data-src*="milestone_checkmark" i], img[alt*="checkmark" i]'));
-    } catch (_) {}
+    try { checks = Array.from(container.querySelectorAll('img[src*="milestone_checkmark" i], img[data-src*="milestone_checkmark" i], img[alt*="checkmark" i]')); } catch (_) {}
+    if (!checks.length) return done;
     const stageForLabel = line => {
       const value = normalizeText(line).toLowerCase();
       if (value === 'initiated' || value === 'return initiated' || value === 'return started') return 'started';
@@ -313,17 +313,25 @@
       if (value === 'refund credited' || value === 'credited') return 'credited';
       return null;
     };
-    for (const check of checks) {
-      let current = check.parentElement || null;
-      for (let depth = 0; current && depth < 6; depth += 1, current = current.parentElement) {
-        const text = normalizeText(current.innerText || current.textContent || '');
-        if (!text || text.length > 700) continue;
-        const labels = Array.from(new Set(text.split('\n').map(stageForLabel).filter(Boolean)));
-        if (labels.length === 1) { done[labels[0]] = true; break; }
-        if (labels.length > 1) break;
+    const text = normalizeText(container.innerText || container.textContent || '');
+    const ordered = [];
+    for (const stage of text.split('\n').map(stageForLabel).filter(Boolean)) if (ordered.at(-1) !== stage) ordered.push(stage);
+    const canonical = ['started','shipped','received','refundIssued','credited'];
+    const prefixUsable = ordered.length >= 2 && ordered.every((stage,index) => canonical[index] === stage);
+    if (prefixUsable && checks.length <= ordered.length) {
+      for (let i=0;i<checks.length;i+=1) done[ordered[i]] = true;
+    } else {
+      for (const check of checks) {
+        let current = check.parentElement || null;
+        for (let depth=0; current && depth<5; depth+=1, current=current.parentElement) {
+          const local = normalizeText(current.innerText || current.textContent || '');
+          if (!local || local.length > 500) continue;
+          const labels = Array.from(new Set(local.split('\n').map(stageForLabel).filter(Boolean)));
+          if (labels.length === 1) { done[labels[0]] = true; break; }
+          if (labels.length > 1) break;
+        }
       }
     }
-    // Later completed milestones imply the earlier physical steps.
     if (done.credited) done.refundIssued = true;
     if (done.refundIssued) done.received = true;
     if (done.received) done.shipped = true;
@@ -336,12 +344,11 @@
     const dom = extractCompletedReturnMilestonesFromDom(container);
     if (!Object.values(dom).some(Boolean)) return record;
     const milestones = record.returnMilestones || parseReturnMilestones(record.statusText || '');
-    for (const key of ['started', 'shipped', 'refundIssued', 'credited']) {
-      const domKey = key;
-      if (!dom[domKey]) continue;
-      milestones[key] = { ...(milestones[key] || {}), done: true };
+    for (const key of ['started', 'shipped', 'received', 'refundIssued', 'credited']) {
+      if (!dom[key]) continue;
+      const labels = key === 'started' ? ['Initiated','Return initiated','Return started'] : key === 'shipped' ? ['Dropped off','Drop off','Return shipped','Shipped'] : key === 'received' ? ['Return received','Received'] : key === 'refundIssued' ? ['Refund issued'] : ['Refund credited','Credited'];
+      milestones[key] = { ...(milestones[key] || {}), done: true, date: milestones[key]?.date || findMilestoneDate(normalizeText(container.innerText || container.textContent || ''), labels) || null };
     }
-    if (dom.received) milestones.receivedByDom = true;
     const stage = dom.credited ? 'credited' : dom.refundIssued ? 'refund_issued' : dom.received ? 'received' : dom.shipped ? 'shipped' : dom.started ? 'started' : milestones.stage || 'unknown';
     const rank = { unknown:0, started:1, shipped:2, received:3, refund_issued:4, credited:5 };
     if ((rank[stage] || 0) > (rank[milestones.stage] || 0)) milestones.stage = stage;
@@ -1688,6 +1695,7 @@
     parseReturnMilestones,
     findExpectedCreditDate,
     extractStatusText,
+    extractCompletedReturnMilestonesFromDom,
     parseTextRecord,
     parseDocument,
     makeRecordId,

@@ -2,7 +2,7 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.7 candidate for Issue #25.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.8 candidate for Issue #27.** GitHub is the source of truth and chat sessions are disposable.
 
 Current live acceptance trackers:
 
@@ -207,3 +207,7 @@ v0.18.6 treats Amazon history pagination as a scoped control state, not generic 
 - Return milestones now require affirmative completion evidence or an item-scoped Amazon timeline checkmark; future instructions, policy prose, and static labels do not advance lifecycle state.
 - Normal serial crawl idle/settle intervals are approximately 30% shorter. Concurrency, retry counts, rate-limit cooldowns, canonical Detail requirements, and Order-ID fingerprint gates are unchanged.
 - Canonical Order Details now persists structured `orderItems`. The dashboard remains one card per order but shows every purchased product beneath it, with product-scoped quantity/price/fulfillment fields only when directly proven. Return groups join to purchased products by strong ASIN or conservative long-title evidence; non-returned products remain visible as `Not returned`, and unmatched returned children stay visible for review.
+
+
+## v0.18.8 Amazon lifecycle / bank separation
+Amazon return lifecycle is five explicit stages: Initiated -> Dropped off -> Return received -> Refund issued -> Refund credited. Amazon milestone checkmarks complete the leading timeline stages; future unchecked labels remain pending. Bank verification is independent and never promotes Amazon stage. A bank-confirmed credit before Amazon shows Refund issued is a review conflict.

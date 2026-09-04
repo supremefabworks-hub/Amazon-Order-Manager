@@ -56,3 +56,15 @@ assert(dashboard.includes('returnedProductCount'), 'order summary must expose ho
 assert(css.includes('v0.18.7 per-product order status'), 'per-product order rows must have responsive no-horizontal-scroll styling');
 
 assert(dashboard.includes('row.strongUnmatchedReturnIdentity'), 'strong unmatched returned items must contribute canonical expected refund to Needs Review dollars');
+
+
+const dashboardV0188 = fs.readFileSync(__dirname + '/dashboard.js','utf8');
+const storageV0188 = fs.readFileSync(__dirname + '/storage.js','utf8');
+const cssV0188 = fs.readFileSync(__dirname + '/ui.css','utf8');
+assert(dashboardV0188.includes("['received', 'Return received'"), 'dashboard must render Return received as its own stage');
+assert(dashboardV0188.includes('storage.isBankCreditConfirmed(ret)'), 'Bank credited must use bank evidence only');
+assert(dashboardV0188.includes('Bank/Amazon conflict'), 'dashboard must expose bank/Amazon conflict');
+assert(dashboardV0188.includes("statusLabel = 'Amazon credited'"), 'bank match must not promote Amazon row to credited');
+assert(storageV0188.includes('function hasAmazonBankConflict'), 'storage must separate Amazon/bank states');
+assert(cssV0188.includes('repeat(5, minmax(0, 1fr))'), 'lifecycle must use five Amazon stages');
+console.log('v0.18.8 Amazon/bank separation UI regressions passed');

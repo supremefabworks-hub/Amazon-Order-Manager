@@ -424,3 +424,9 @@ Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is expli
 - Crawl pacing is ~30% faster through shorter serial delays only; rate-limit and correctness gates are unchanged.
 - Canonical Order Details now stores structured purchased `orderItems`; UI joins return groups per purchased product and displays all purchased products, including non-returned ones.
 - Issue #25 tracks live acceptance. Issue #23 remains separate until year rollover is observed live.
+
+
+## v0.18.8 live return-state fix
+- Breville `113-1426991-3716216`: Amazon shows completed Initiated Aug 7, Dropped off Aug 31, Return received Sep 2; Refund issued Sep 10 and Refund credited Sep 17 are future unchecked labels.
+- v0.18.8 adds explicit Return received UI/storage, ordered-prefix milestone checkmark interpretation, and strict separation of Amazon lifecycle vs bank verification.
+- Bank-before-refund-issued becomes Needs Review instead of Credited. Issue #27 tracks live acceptance.

@@ -336,3 +336,8 @@ html, body { max-width: 100%; overflow-x: hidden; }
 @media (max-width: 1050px) {
   .order-product-head strong { white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 }
+
+
+/* v0.18.8 five-stage Amazon return lifecycle. Bank verification renders separately. */
+.lifecycle-five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.lifecycle-five .lifecycle-line { left: 7%; right: 7%; }
