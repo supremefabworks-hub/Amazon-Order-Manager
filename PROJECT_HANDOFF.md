@@ -454,3 +454,11 @@ Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is expli
 - Explicit no-return-required replacement evidence suppresses the replacement-management return-status link from return counting/fetching; ambiguous/return-required replacements remain eligible for normal return processing.
 - Replacement-only orders should show replacement status, Refund `—`, and remain outside Returns/Return review.
 - Use synthetic fixtures only in committed tests; do not commit live order exports or addresses.
+
+
+## v0.18.12 adaptive smart-fast pacing candidate
+- Issue #35 tracks live throughput/rate-limit acceptance.
+- Serial architecture remains mandatory: one Amazon job at a time; no parallel detail, return, or history requests.
+- Normal pacing: 75–250 ms between jobs; 60–90 jobs per burst; 8–15 sec normal cooldown. Amazon throttle cooldown stays 10–20 min.
+- Rendered pages use bounded job-specific readiness polling instead of fixed 450–900 ms settle delay. Readiness timeout falls through to authoritative scan; it never counts as completeness.
+- History lazy-load stabilization requires both scroll height and Order-ID fingerprint stable for three samples.
