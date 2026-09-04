@@ -600,3 +600,20 @@ const v185StrongEntries = p.extractReturnItemEntries(v185StrongReturnItem);
 assert(v185StrongEntries.length === 1 && v185StrongEntries[0].asin === 'B000000002', 'direct data-asin item block must preserve strong ASIN evidence');
 assert(v185StrongEntries[0].asinEvidenceSource === 'return-item-data-asin', 'strong return ASIN must record its binding source');
 console.log('v0.18.5 structural scope and return identity parser regressions passed');
+
+
+// v0.18.5 strong+weak duplicate collapse regression
+const v185DuplicateAnchor = v185ProductAnchor('B000000003', 'Duplicate Returned Product');
+const v185StrongChild = v185FakeNode('Return item\nDuplicate Returned Product\nQuantity: 1\nRefund amount $9.99', null, [v185DuplicateAnchor], {'data-asin':'B000000003'});
+const v185BroadParent = v185FakeNode('Return item\nDuplicate Returned Product\nQuantity: 1\nRefund amount $9.99', null, [v185DuplicateAnchor]);
+const v185CompositeReturn = {
+  querySelectorAll(selector) {
+    if (selector === '[data-asin]') return [v185StrongChild];
+    if (selector === '.a-box') return [v185BroadParent];
+    return [];
+  }
+};
+const v185CollapsedEntries = p.extractReturnItemEntries(v185CompositeReturn);
+assert(v185CollapsedEntries.length === 1, 'specific and broad representations of the same return item must collapse to one child');
+assert(v185CollapsedEntries[0].asin === 'B000000003' && v185CollapsedEntries[0].asinEvidenceSource === 'return-item-data-asin', 'strong item-specific evidence must win duplicate collapse');
+console.log('v0.18.5 duplicate return item collapse regression passed');

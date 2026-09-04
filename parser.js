@@ -578,15 +578,18 @@
         candidates.push({ itemName, asin, asinEvidenceSource, refundAmount, textLength: text.length, strongItemSelector });
       }
     }
-    const byKey = new Map();
+    const deduped = [];
+    const scoreEntry = entry => (entry.asinEvidenceSource ? 100000 : 0) + (entry.strongItemSelector ? 10000 : 0) - entry.textLength;
+    const nameKey = entry => normalizeText(entry.itemName || '').toLowerCase();
     for (const entry of candidates) {
-      const key = entry.asin || String(entry.itemName || '').toLowerCase();
-      const prior = byKey.get(key);
-      const score = (entry.asinEvidenceSource ? 100000 : 0) + (entry.strongItemSelector ? 10000 : 0) - entry.textLength;
-      const priorScore = prior ? ((prior.asinEvidenceSource ? 100000 : 0) + (prior.strongItemSelector ? 10000 : 0) - prior.textLength) : -Infinity;
-      if (!prior || score > priorScore) byKey.set(key, entry);
+      const index = deduped.findIndex(prior =>
+        (entry.asin && prior.asin && entry.asin === prior.asin) ||
+        (nameKey(entry) && nameKey(entry) === nameKey(prior))
+      );
+      if (index < 0) deduped.push(entry);
+      else if (scoreEntry(entry) > scoreEntry(deduped[index])) deduped[index] = entry;
     }
-    return Array.from(byKey.values()).map(({ textLength, strongItemSelector, ...entry }) => entry).slice(0, 30);
+    return deduped.map(({ textLength, strongItemSelector, ...entry }) => entry).slice(0, 30);
   }
 
   function isCompleteCanonicalDetail(record, url) {
