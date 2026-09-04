@@ -166,4 +166,6 @@ assert(backgroundSourceV01814.includes("tab.active !== true") && backgroundSourc
 assert(backgroundSourceV01814.includes('state.crawl.manualStop'), 'Auto-start must respect explicit manual Stop latch');
 assert(backgroundSourceV01814.includes("resumePersistedCrawl('browser-startup')") && backgroundSourceV01814.includes("resumePersistedCrawl('version-update')"), 'browser/update startup must resume persisted active crawl');
 assert(backgroundSourceV01814.includes('RATE_LIMIT_COOLDOWN_MIN_MS = 10 * 60 * 1000') && backgroundSourceV01814.includes('RATE_LIMIT_COOLDOWN_MAX_MS = 20 * 60 * 1000'), 'v0.18.14 must preserve rate-limit cooldown safety');
+assert(backgroundSourceV01814.includes("ignored: 'crawler-already-processing'") && backgroundSourceV01814.includes('if (processing && !state.paused) return state;'), 'Auto-start/manual resume must not requeue an in-flight currentJob in the same service worker');
+assert(backgroundSourceV01814.includes('const staleWorkerTabId = data[WORKER_TAB_KEY]') && backgroundSourceV01814.includes('await chrome.tabs.remove(staleWorkerTabId)'), 'version migration must close an orphaned old worker tab before clearing its transient identity');
 console.log('v0.18.14 durable resume/autostart background regressions passed');

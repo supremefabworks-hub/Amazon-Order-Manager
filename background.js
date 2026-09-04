@@ -37,7 +37,7 @@ let workerTabId = null;
 async function ensureDevelopmentVersionState(previousVersionHint = null) {
   const version = chrome.runtime?.getManifest?.()?.version || null;
   if (!version) return { changed: false, version: null };
-  const data = await chrome.storage.local.get([VERSION_KEY, STATE_KEY]);
+  const data = await chrome.storage.local.get([VERSION_KEY, STATE_KEY, WORKER_TAB_KEY]);
   const prior = data[VERSION_KEY] || previousVersionHint || null;
   if (prior === version) return { changed: false, version };
 
@@ -45,6 +45,10 @@ async function ensureDevelopmentVersionState(previousVersionHint = null) {
   // A version update may invalidate a transient Chrome tab ID, but it must not erase the exact
   // lifetime-crawl checkpoint or hundreds of already completed canonical orders.
   if (prior) {
+    const staleWorkerTabId = data[WORKER_TAB_KEY];
+    if (Number.isInteger(staleWorkerTabId)) {
+      try { await chrome.tabs.remove(staleWorkerTabId); } catch (_) {}
+    }
     workerTabId = null;
     await chrome.storage.local.remove([WORKER_TAB_KEY]).catch(() => {});
     if (data[STATE_KEY]) {
@@ -610,6 +614,10 @@ async function handleAmazonUserPageReady(sender) {
   const tab = sender?.tab || null;
   if (!tab || !Number.isInteger(tab.id) || tab.active !== true) return { ok: true, ignored: 'inactive-tab' };
   if (tab.id === workerTabId) return { ok: true, ignored: 'worker-tab' };
+  // A page-ready signal from the user's active Amazon tab can arrive while this service worker is
+  // already executing a crawl job. That currentJob is live, not interrupted, so never reconstruct
+  // or requeue it from Auto-start while the in-memory serial lock is held.
+  if (processing) return { ok: true, ignored: 'crawler-already-processing' };
   const settings = await getSettings();
   if (!settings.autoStartOnAmazon) return { ok: true, ignored: 'auto-start-disabled' };
   const state = ensureCrawl(await getState());
@@ -624,6 +632,10 @@ async function startOrResumeFullScan({ restart = false, startYear = null, source
   let state = ensureCrawl(await getState());
   if (!restart && state.crawl.active) {
     if (source === 'auto-amazon' && state.crawl.manualStop) return state;
+    // In the same live service worker, an in-memory processing=true means currentJob is genuinely
+    // in flight. Resume must not reinterpret it as stale. After a browser/service-worker restart
+    // processing is false, so persisted currentJob recovery still works exactly as intended.
+    if (processing && !state.paused) return state;
     const alreadyRunning = !state.paused && state.running && !state.currentJob && state.queue.length > 0;
     if (source === 'auto-amazon' && alreadyRunning) return state;
     state = reconstructActiveCrawl(state, source, { clearManualStop: source !== 'auto-amazon' });
