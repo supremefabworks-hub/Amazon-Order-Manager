@@ -1,0 +1,35 @@
+name: Harden v0.18.14 resume race boundaries
+
+on:
+  push:
+    branches: [v01814-durable-resume-autostart]
+    paths:
+      - '.github/workflows/harden-v01814.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v01814-durable-resume-autostart
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply resume race hardening
+        run: python3 tools/harden_v01814.py
+      - name: Validate hardened candidate
+        run: |
+          node --check background.js
+          npm test
+      - name: Commit hardening and remove temporary machinery
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f tools/harden_v01814.py .github/workflows/harden-v01814.yml
+          git add -A
+          git commit -m 'Harden v0.18.14 resume concurrency and worker cleanup [v01814-hardening]'
+          git push origin HEAD:v01814-durable-resume-autostart
