@@ -389,7 +389,7 @@ function uniqueDetailLinks(result) {
     const orderId = String(link?.orderId || '').trim();
     const url = normalizeUrl(link?.url) || link?.url || null;
     if (!/^\d{3}-\d{7}-\d{7}$/.test(orderId) || !url || byId.has(orderId)) continue;
-    if (!/(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|order-details)/i.test(url)) continue;
+    if (!/(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html|order-details)/i.test(url)) continue;
     byId.set(orderId, { orderId, url });
   }
   return Array.from(byId.values());
@@ -416,7 +416,7 @@ async function queueManagedHistoryResult(result, job) {
   if (!pageOrderIds.length) throw new Error(`No visible Amazon Order IDs were found on ${year} page ${page}`);
   const linkByOrder = new Map(links.map(link => [link.orderId, link]));
   const missingDetailUrls = pageOrderIds.filter(orderId => !linkByOrder.has(orderId));
-  if (missingDetailUrls.length) throw new Error(`Missing real View order details URL for ${missingDetailUrls.length} order(s) on ${year} page ${page}. The crawler stopped rather than inventing canonical URLs.`);
+  if (missingDetailUrls.length) throw new Error(`Missing real View order details URL for ${missingDetailUrls.length} order(s) on ${year} page ${page}: ${missingDetailUrls.join(', ')}. The crawler stopped rather than inventing canonical URLs.`);
   const orderedLinks = pageOrderIds.map(orderId => linkByOrder.get(orderId));
   crawl.currentPageOrderIds = pageOrderIds;
   crawl.currentPageCompleted = 0;
@@ -935,7 +935,7 @@ async function forceRefreshOrder(orderId) {
   const ledger = Array.isArray(data[LEDGER_KEY]) ? data[LEDGER_KEY] : [];
   const order = ledger.find(r => r?.recordType === 'order' && r?.orderId === id) || null;
   const detailUrl = order?.orderDetailsUrl || null;
-  if (!detailUrl || !/(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|order-details)/i.test(detailUrl)) {
+  if (!detailUrl || !/(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html|order-details)/i.test(detailUrl)) {
     throw new Error('This order has no real captured View order details URL. Refresh cannot invent one.');
   }
   const tab = await chrome.tabs.create({ url: detailUrl, active: false });

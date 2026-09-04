@@ -130,5 +130,31 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   assert(stableMerged.itemIdentitySource === 'order-detail-return-link', 'matching refresh must retain the trusted Order Details binding');
   assert(!stableMerged.itemIdentityConflict, 'missing ASIN with the same trusted title must not create a false identity conflict');
 
+
+
+  const trustedTitleBase = {
+    recordId: 'return:113-7777777-8888888:rma-title:item-item-1', recordType: 'return', orderId: '113-7777777-8888888',
+    returnToken: 'RMA-TITLE', returnItemId: 'ITEM-1', itemNames: ['RAMPOW Micro USB Cable 2 Pack 3.3ft'], asins: [],
+    itemIdentitySource: 'order-detail-return-link', provisionalReturn: true, authoritativeReturnCapture: false,
+    status: 'return_in_progress', returnStage: 'started'
+  };
+  await s.upsertRecords([trustedTitleBase]);
+  await s.upsertRecords([{ ...trustedTitleBase,
+    itemNames: ['RAMPOW Micro USB Cable 2 Pack 3.3FT, USB-A to Micro USB Fast Charging Cable & Data Sync Cord'],
+    itemIdentitySource: 'return-page-item', provisionalReturn: false, authoritativeReturnCapture: true
+  }]);
+  const titleVariation = (await s.getLedger()).find(r => r.recordId === trustedTitleBase.recordId);
+  assert(titleVariation.itemIdentityConflict !== true, 'same returnItemId title variation without contradictory ASIN must not become an item conflict');
+  assert(titleVariation.itemNames.length === 1 && titleVariation.itemNames[0] === trustedTitleBase.itemNames[0], 'trusted Order Details item title must remain the display identity');
+
+  const asinConflictBase = { ...trustedTitleBase,
+    recordId: 'return:113-7777777-8888889:rma-asin:item-item-2', orderId: '113-7777777-8888889', returnToken: 'RMA-ASIN', returnItemId: 'ITEM-2',
+    itemNames: ['Trusted Product'], asins: ['B000000001']
+  };
+  await s.upsertRecords([asinConflictBase]);
+  await s.upsertRecords([{ ...asinConflictBase, asins: ['B000000002'], itemNames: ['Different Product'], itemIdentitySource: 'return-page-item', provisionalReturn: false, authoritativeReturnCapture: true }]);
+  const asinConflict = (await s.getLedger()).find(r => r.recordId === asinConflictBase.recordId);
+  assert(asinConflict.itemIdentityConflict === true, 'contradictory non-empty ASIN evidence for the same returnItemId must remain reviewable');
+
   console.log('storage tests passed');
 })().catch(error => { console.error(error); process.exit(1); });

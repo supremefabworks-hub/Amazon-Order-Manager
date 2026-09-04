@@ -30,7 +30,7 @@
   }
   function canonicalDetailUrl(orderId, order) {
     const url = order?.orderDetailsUrl || '';
-    if (url && /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|order-details)/i.test(url)) return url;
+    if (url && /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html|order-details)/i.test(url)) return url;
     return '';
   }
   function stageLabel(stage) {
@@ -106,12 +106,14 @@
         return String(b.lastScannedAt || '').localeCompare(String(a.lastScannedAt || ''));
       })[0];
       const amountState = returnGroupAmount(groupRecords);
+      const trustedIdentityRecords = groupRecords.filter(r => r.itemIdentitySource === 'order-detail-return-link' && ((r.itemNames || []).length || (r.asins || []).length));
+      const identityRecords = trustedIdentityRecords.length ? trustedIdentityRecords : groupRecords;
       return {
         key,
         records: groupRecords,
         representative,
-        itemNames: uniqueStrings(groupRecords.flatMap(r => r.itemNames || [])),
-        asins: uniqueStrings(groupRecords.flatMap(r => r.asins || [])),
+        itemNames: uniqueStrings(identityRecords.flatMap(r => r.itemNames || [])),
+        asins: uniqueStrings(identityRecords.flatMap(r => r.asins || [])),
         amount: amountState.amount,
         amountConflict: amountState.conflict,
         itemIdentityConflict: groupRecords.some(r => r.itemIdentityConflict)
@@ -146,7 +148,7 @@
       const allIssued = hasReturn && ranks.every(rank => rank >= storage.RETURN_STAGE_RANK.refund_issued);
 
       const orderItemNames = uniqueStrings(order?.itemNames || []);
-      const returnedItemNames = uniqueStrings(returnRecords.flatMap(r => r.itemNames || []));
+      const returnedItemNames = uniqueStrings(returnGroups.flatMap(group => group.itemNames || []));
       const childRefundAmount = returnGroups.reduce((total, group) => total + (Number.isFinite(Number(group.amount)) ? Number(group.amount) : 0), 0);
       const canonicalRefundCandidate = order?.canonicalRefundTotal;
       const canonicalRefundTotal = canonicalRefundCandidate !== null && canonicalRefundCandidate !== undefined && canonicalRefundCandidate !== '' && Number.isFinite(Number(canonicalRefundCandidate))
@@ -166,7 +168,7 @@
       else if (needsReview) {
         stateKey = 'needs_review';
         if (refundAmountMismatch) statusLabel = 'Refund amount mismatch';
-        else if (itemIdentityConflict) statusLabel = 'Return item needs review';
+        else if (itemIdentityConflict) statusLabel = 'Item needs review';
         else if (groupAmountConflict) statusLabel = 'Return refund needs review';
         else {
           const lowest = returnRecords.slice().sort((a,b) => storage.returnStageRank(a)-storage.returnStageRank(b))[0];

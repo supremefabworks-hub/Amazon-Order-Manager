@@ -312,3 +312,6 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .return-track-meta { display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin:1px 0 2px; min-width:0; font-size:8px; color:#59616b; }
 .return-track-meta span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .return-track-meta strong { flex:0 0 auto; font-size:9px; color:#1f2328; }
+
+/* v0.18.3 status badges stay inside their fixed ledger column. */
+.line-status .badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; text-align: left; }

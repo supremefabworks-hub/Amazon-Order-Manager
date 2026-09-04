@@ -281,19 +281,39 @@
   }
 
   function extractStatusText(text) {
-    const lines = normalizeText(text).split('\n').map(s => s.trim()).filter(Boolean);
-    const keywords = [
-      'your refund has been credited', 'your refund was credited', 'we have credited your refund',
-      'we have issued your refund', 'your refund was issued', 'refund has been issued',
-      'refund issued', 'refunded', 'refund complete', 'refund sent',
-      'return received', 'received your return', 'return complete', 'return in transit',
-      'return shipped', 'shipped back', 'dropped off', 'drop-off complete',
-      'accepted your return', 'return request', 'refund will be issued', 'estimated refund',
-      'delivered', 'shipped', 'arriving'
-    ];
-    for (const keyword of keywords) {
-      const line = lines.find(l => l.toLowerCase().includes(keyword));
-      if (line) return line.slice(0, 240);
+    const normalized = normalizeText(text);
+    const lines = normalized.split('\n').map(s => s.trim()).filter(Boolean);
+    if (!lines.length) return null;
+
+    const stage = parseReturnMilestones(normalized).stage;
+    const stagePatterns = {
+      credited: [
+        /(?:your refund (?:has been|was) credited|we (?:have )?credited your refund|refund (?:has been|was) credited to|credited to your (?:original )?payment method on)/i
+      ],
+      refund_issued: [
+        /(?:we (?:have )?issued your refund|your refund (?:has been|was) issued|refund has been issued|refund issued\s+(?:on|\$))/i
+      ],
+      received: [
+        /(?:we (?:have )?received your return|return (?:has been )?received|received your return|item received|return processed|your return is complete|return complete)/i
+      ],
+      shipped: [
+        /(?:dropped off|drop-?off complete|return (?:is )?in transit|on the way back|return shipped|shipped back|carrier received)/i
+      ],
+      started: [
+        /(?:return request|return initiated|return started|accepted your return|return code|return summary|refund will be issued|estimated refund)/i
+      ]
+    };
+
+    for (const pattern of stagePatterns[stage] || []) {
+      const line = lines.find(candidate => pattern.test(candidate));
+      if (line) return line.slice(0, 500);
+    }
+
+    // Normal purchase/delivery rows still need useful order status text, but static return
+    // timeline labels such as a bare "Refund issued" are deliberately excluded here.
+    for (const line of lines) {
+      if (/^(?:refund issued|refund credited|credited|initiated|dropped off|credit pending)$/i.test(line)) continue;
+      if (/(?:delivered|arriving|shipped)/i.test(line) && !/(?:refund issued|refund credited)/i.test(line)) return line.slice(0, 500);
     }
     return null;
   }
@@ -303,21 +323,21 @@
     const u = String(url || '').toLowerCase();
     // An order-history/detail page can contain return buttons/status text for individual orders;
     // that must not turn every order on the page into a return record.
-    if (/order-history|your-orders|yourorders|order-details|orderdetails|order-detail/.test(u)) return 'order';
+    if (/order-history|your-orders|yourorders|order-details|orderdetails|order-detail|\/gp\/css\/summary\/edit\.html/.test(u)) return 'order';
     if (/\/spr\/returns\/(?:prep|label|cart)|\/returns?\/(?:status|details)|return-status|\/refund(?:\/|\?|$)/.test(u)) return 'return';
     if (/return summary/.test(t) && /(refund method|refund subtotal|total refund|return instructions)/.test(t)) return 'return';
     return 'order';
   }
 
   function isOrderDetailPage(url) {
-    return /(?:order-details|orderdetails|order-detail)/i.test(String(url || ''));
+    return /(?:order-details|orderdetails|order-detail|\/gp\/css\/summary\/edit\.html(?:[/?#]|$))/i.test(String(url || ''));
   }
 
   function isOrderHistoryPage(doc, url) {
     const u = String(url || '').toLowerCase();
     // /your-orders/order-details is a detail page, not a one-order history page. Treating it as
     // history caused the crawler to rediscover the same order and manufacture bogus pagination.
-    if (/\/your-orders\/order-details|\/gp\/your-account\/order-details|orderdetails|order-detail/.test(u)) return false;
+    if (/\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html|orderdetails|order-detail/.test(u)) return false;
     if (/\/gp\/your-account\/order-history|\/gp\/css\/order-history|\/your-orders\/orders(?:[/?#]|$)/.test(u)) return true;
     const text = normalizeText(doc?.body?.innerText || doc?.body?.textContent || '').toLowerCase();
     return /your orders/.test(text) && /viewing\s+[0-9,]+\s+orders?\s+placed\s+in|(?:^|\n)order placed(?:\n|$)/.test(text);
@@ -357,7 +377,7 @@
     const matchingAnchors = Array.from(doc.querySelectorAll('a[href]')).filter(a => {
       const href = String(a.getAttribute('href') || a.href || '');
       const text = normalizeText(a.innerText || a.textContent || '');
-      return href.includes(orderId) && (/(?:\/your-orders\/order-details|order-details|orderdetails)/i.test(href) || /view\s+order\s+details/i.test(text));
+      return href.includes(orderId) && (/(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html|order-details|orderdetails)/i.test(href) || /view\s+order\s+details/i.test(text));
     });
     for (const anchor of matchingAnchors) {
       let current = anchor;
@@ -598,13 +618,13 @@
     for (const a of Array.from(doc.querySelectorAll('a[href]'))) {
       const href = String(a.getAttribute('href') || a.href || '');
       const text = normalizeText(a.innerText || a.textContent || '');
-      const looksLikeDetailHref = /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|order-details|orderdetails|order-detail)/i.test(href);
+      const looksLikeDetailHref = /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html|order-details|orderdetails|order-detail)/i.test(href);
       const looksLikeDetailText = /^(?:view\s+)?order\s+details$/i.test(text);
       if (!looksLikeDetailHref && !looksLikeDetailText) continue;
       const url = absoluteAmazonUrl(href, baseUrl);
       if (!url) continue;
       let actualDetailPath = false;
-      try { actualDetailPath = /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details)(?:[/?#]|$)/i.test(new URL(url).pathname); } catch (_) {}
+      try { actualDetailPath = /(?:\/your-orders\/order-details|\/gp\/your-account\/order-details|\/gp\/css\/summary\/edit\.html)(?:[/?#]|$)/i.test(new URL(url).pathname); } catch (_) {}
       if (!actualDetailPath && !looksLikeDetailText) continue;
       const orderId = orderIdFromUrl(url) || nearestOrderId(a);
       if (!orderId || byOrder.has(orderId)) continue;

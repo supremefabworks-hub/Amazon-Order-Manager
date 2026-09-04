@@ -25,4 +25,12 @@ assert(dashboard.includes('sourceExtensionVersion: chrome.runtime.getManifest()?
 assert(css.includes('v0.18.2 explicit multi-return child groups'), 'multi-return child status/amount metadata must have compact styling');
 assert(dashboard.includes('refundAmountMismatch'), 'dashboard must flag child-return totals that exceed canonical refund total');
 assert(dashboard.includes('Return ${index}'), 'dashboard must render distinct compact child return blocks');
+
+assert(background.includes('gp\\/css\\/summary\\/edit\\.html'), 'background canonical validator must accept captured legacy Order Details route');
+assert(content.includes('gp\\/css\\/summary\\/edit\\.html'), 'content detail fetch validator must accept captured legacy Order Details route');
+assert(dashboard.includes('gp\\/css\\/summary\\/edit\\.html'), 'dashboard Details action must accept captured legacy Order Details route');
+assert(background.includes("missingDetailUrls.join(', ')"), 'missing-detail hard stop must identify the exact missing Order IDs');
+assert(dashboard.includes("itemIdentitySource === 'order-detail-return-link'"), 'return group display must prefer trusted Order Details identity');
+assert(css.includes('.line-status .badge') && css.includes('white-space: normal'), 'long status badges must wrap instead of overlapping the order column');
+
 console.log('ui regression tests passed');

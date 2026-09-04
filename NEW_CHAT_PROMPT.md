@@ -20,7 +20,7 @@ This chat is disposable. Do **not** rely on memory or assumptions from any previ
 
 ## Current baseline
 
-The complete root source baseline is **v0.18.2 after PR #16 merges**. The exact v0.16.0 package under `source-snapshots/v0.16.0/full/` is historical recovery/audit material only and must not replace the complete current root unless an intentional rollback is explicitly required.
+The complete root source baseline is **v0.18.3 candidate for Issue #17**. The exact v0.16.0 package under `source-snapshots/v0.16.0/full/` is historical recovery/audit material only and must not replace the complete current root unless an intentional rollback is explicitly required.
 
 v0.18 preserves the v0.17 authoritative Amazon behavior and adds the verified Windows development auto-update channel.
 
@@ -51,6 +51,10 @@ Every user-testable revision must bump **both** `manifest.json` and `package.jso
 
 The updater is development-only. Do not turn it into a remote-JavaScript loader. Do not place GitHub credentials, Amazon credentials/cookies, bank credentials/tokens, or private keys in the extension/updater. Before production, remove/disable the local updater, replace destructive development version resets with migrations, and use the Chrome Web Store update channel.
 
+
+## v0.18.3 live acceptance additions
+
+Accept captured Amazon legacy `/gp/css/summary/edit.html?orderID=...` as a real Order Details route, but never synthesize one. Missing-link stops must name the exact Order ID. Stable `returnItemId` binds a returned item; title variation alone is not a conflict, while contradictory non-empty ASIN evidence remains reviewable. Prefer trusted Order Details return-link item identity in the dashboard. Bare static `Refund issued` timeline labels are not affirmative status evidence. v0.18.3 is the unattended updater proof from repaired v0.18.2.
 
 ## v0.18.2 durable additions
 

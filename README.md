@@ -2,7 +2,7 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.2 after PR #16 merges.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.3 candidate for Issue #17.** GitHub is the source of truth and chat sessions are disposable.
 
 Two issues remain intentionally separate:
 
@@ -70,6 +70,13 @@ The native updater, stable development ID policy, and destructive development ve
 - preserve ledger data across normal upgrades,
 - use Chrome Web Store distribution/update mechanisms.
 
+
+
+## v0.18.3 live acceptance hardening
+
+v0.18.3 addresses live Amazon Business findings after v0.18.2: captured legacy `/gp/css/summary/edit.html?orderID=...` links are accepted as real canonical Order Details routes; strict missing-link failures now name the exact Order ID(s); same-`itemId` title variation no longer creates false item conflicts unless non-empty ASIN evidence contradicts; dashboard return-group identity prefers the exact Order Details return-link binding; and bare static `Refund issued` timeline labels cannot appear as affirmative refund-issued status text. Long status badges wrap within the fixed column.
+
+This release is also the unattended updater proof from repaired v0.18.2. Do not manually replace `current` or press Reload when `dev-v0.18.3` publishes.
 
 ## v0.18.2 multi-return model
 
