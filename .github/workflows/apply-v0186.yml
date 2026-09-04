@@ -19,6 +19,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Correct generator typo
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tools/apply_v0186.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace("'parsed history route-aware control')\\n", "'parsed history route-aware control')")
+          path.write_text(text, encoding='utf-8')
+          PY
       - name: Apply v0.18.6 fixes
         run: python3 tools/apply_v0186.py
       - name: Validate generated source
