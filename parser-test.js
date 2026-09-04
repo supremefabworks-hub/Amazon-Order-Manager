@@ -617,3 +617,57 @@ const v185CollapsedEntries = p.extractReturnItemEntries(v185CompositeReturn);
 assert(v185CollapsedEntries.length === 1, 'specific and broad representations of the same return item must collapse to one child');
 assert(v185CollapsedEntries[0].asin === 'B000000003' && v185CollapsedEntries[0].asinEvidenceSource === 'return-item-data-asin', 'strong item-specific evidence must win duplicate collapse');
 console.log('v0.18.5 duplicate return item collapse regression passed');
+
+
+// v0.18.6 final-page pagination regressions
+function v0186PagerElement({ text = '', href = '', className = '', tagName = 'A', ariaDisabled = null, inPager = true, role = null } = {}) {
+  return {
+    innerText: text, textContent: text, href, className, tagName, disabled: false,
+    getAttribute(name) {
+      if (name === 'href') return href || null;
+      if (name === 'class') return className || null;
+      if (name === 'aria-disabled') return ariaDisabled;
+      if (name === 'aria-label') return text;
+      if (name === 'role') return role;
+      return null;
+    },
+    closest(selector) {
+      if (/(?:\.a-disabled|\.s-pagination-disabled|\[aria-disabled="true"\])/.test(selector) && (ariaDisabled === 'true' || /(?:^|\s)(?:a-disabled|s-pagination-disabled|disabled)(?:\s|$)/i.test(className))) return this;
+      if (inPager && /(?:\.a-pagination|ul\.a-pagination|aria-label\*?=.?pagination|data-testid\*?=.?pagination)/i.test(selector)) return { className: 'a-pagination' };
+      return null;
+    }
+  };
+}
+function v0186PagerDoc(currentPage, controls, activeNext = null) {
+  const current = v0186PagerElement({ text: String(currentPage), href: `#pagination/${currentPage}/` });
+  return {
+    querySelector(selector) {
+      if (selector.includes('a-selected') || selector.includes('aria-current') || selector.includes('s-pagination-selected')) return current;
+      if (activeNext && /next|a-last|rel="next"/i.test(selector)) return activeNext;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'a[href]') return controls.filter(x => x.href);
+      if (selector.includes('a[href], button')) return controls;
+      return [];
+    }
+  };
+}
+const v0186DisabledNext = v0186PagerElement({ text: 'Next', tagName: 'LI', href: '', className: 'a-last a-disabled', ariaDisabled: 'true' });
+const v0186FinalLinks = [11,12,13,14,15,16,17,18].map(n => v0186PagerElement({ text:String(n), href:`#pagination/${n}/` }));
+const v0186FinalDoc = v0186PagerDoc(18, [...v0186FinalLinks, v0186DisabledNext]);
+const v0186FinalUrl = 'https://www.amazon.com/gp/your-account/order-history#time/2026/pagination/18/';
+assert(p.hasNextPageControl(v0186FinalDoc, v0186FinalUrl) === false, 'selected final page + disabled Next must end the current history year');
+assert(p.findNextLink(v0186FinalDoc, v0186FinalUrl) == null, 'final page must not synthesize or discover page 19 when Next is disabled');
+
+const v0186Page18 = v0186PagerElement({ text:'18', href:'#pagination/18/' });
+const v0186EnabledNext = v0186PagerElement({ text:'Next', href:'#pagination/18/' });
+const v0186Page17Doc = v0186PagerDoc(17, [v0186Page18, v0186EnabledNext], v0186EnabledNext);
+const v0186Page17Url = 'https://www.amazon.com/gp/your-account/order-history#time/2026/pagination/17/';
+assert(p.hasNextPageControl(v0186Page17Doc, v0186Page17Url) === true, 'page 17 with real page 18/enabled Next must continue');
+const v0186NextUrl = p.findNextLink(v0186Page17Doc, v0186Page17Url);
+assert(v0186NextUrl && /pagination\/18\//.test(v0186NextUrl), 'page 17 must resolve the concrete page 18 route');
+
+const v0186UnrelatedNext = v0186PagerElement({ text:'Next', tagName:'BUTTON', href:'', inPager:false });
+const v0186UnrelatedDoc = v0186PagerDoc(18, [v0186UnrelatedNext]);
+assert(p.hasNextPageControl(v0186UnrelatedDoc, v0186FinalUrl) === false, 'unrelated whole-page Next text/button must not masquerade as history pagination');

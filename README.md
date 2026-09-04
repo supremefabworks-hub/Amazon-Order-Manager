@@ -2,7 +2,7 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.5 candidate for Issue #19.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.6 candidate for Issue #19.** GitHub is the source of truth and chat sessions are disposable.
 
 Two issues remain intentionally separate:
 
@@ -192,3 +192,8 @@ Issue #19 tracks live acceptance using order `112-3886192-2097013` as the observ
 ## v0.18.5 live structural-scoping hardening
 
 v0.18.5 fixes two live parser defects. Orders with no Detail action, especially proven `$0.00` cancelled orders, are now scoped by their own structural Order History card using the visible Order ID and single-order ancestor boundaries instead of falling back to neighboring page text. Return-page identity is also hardened: whole-page/broad-section product links cannot manufacture returned-item ASINs; contradictory ASIN evidence is reviewable only when directly bound to the return item through a specific item block/data-ASIN or direct product anchor. Stable Amazon `returnItemId` plus trusted Order Details identity remains authoritative.
+
+
+## v0.18.6 end-of-year pagination boundary
+
+v0.18.6 treats Amazon history pagination as a scoped control state, not generic page text. A selected final page with disabled/no actionable Next now marks that year complete and queues the next older discovered year. Enabled Next or a concrete numeric N+1 pagination target still advances only after the visible Order-ID fingerprint changes. Generic unrelated `Next` text cannot keep a year alive.

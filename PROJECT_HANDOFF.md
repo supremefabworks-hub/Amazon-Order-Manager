@@ -410,3 +410,10 @@ Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is expli
 - `$0.00` terminal cancelled exception remains strict and now receives the correct scoped card.
 - Broad return-page product links no longer create ASIN identity; only directly bound item ASIN evidence may conflict with trusted Order Details identity.
 - Live examples motivating the identity fix: RAMPOW order `111-1110034-5588263` and Milton order `111-8528386-2632255`.
+
+
+## v0.18.6 live boundary fix
+- Live v0.18.5 reached 2026 page 18 with 7/7 orders complete but mistook disabled Next for an actionable pager and stopped instead of switching years.
+- v0.18.6 scopes Next detection to real pagination controls/numeric pagination routes. Final selected page + disabled/no actionable Next = year complete -> next older year.
+- Page fingerprint remains the only proof of a successful within-year advance.
+- Issue #23 remains open until a live lifetime scan crosses 2026 page 18 into 2025.
