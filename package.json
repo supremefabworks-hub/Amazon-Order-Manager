@@ -1,8 +1,8 @@
 {
   "name": "amazon-order-manager",
-  "version": "0.18.3",
+  "version": "0.18.4",
   "private": true,
-  "description": "Amazon / Amazon Business order, return-group, refund, and credit tracking Chrome extension with verified development auto-updates",
+  "description": "Amazon / Amazon Business order, terminal-cancellation, return-group, refund, and credit tracking Chrome extension with verified development auto-updates",
   "scripts": {
     "test": "node parser-test.js && node payment-evidence-test.js && node multi-return-test.js && node storage-test.js && node background-test.js && node state-machine-test.js && node reconciliation-test.js && node ui-test.js && node dev-updater-test.js && node updater-reliability-test.js && node release-test.js",
     "check": "npm test"

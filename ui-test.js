@@ -33,4 +33,12 @@ assert(background.includes("missingDetailUrls.join(', ')"), 'missing-detail hard
 assert(dashboard.includes("itemIdentitySource === 'order-detail-return-link'"), 'return group display must prefer trusted Order Details identity');
 assert(css.includes('.line-status .badge') && css.includes('white-space: normal'), 'long status badges must wrap instead of overlapping the order column');
 
+
+assert(background.includes('terminalCancelledHistoryOrders'), 'background must have a narrow terminal cancelled-order gate');
+assert(background.includes("historyTerminalState !== 'cancelled'"), 'background terminal gate must require explicit cancelled state');
+assert(background.includes('Number(record.purchaseAmount) === 0'), 'background terminal gate must require exact zero-dollar total');
+assert(dashboard.includes("stateKey = 'cancelled'"), 'dashboard must render terminal cancelled orders as Cancelled');
+assert(dashboard.includes('Terminal history'), 'dashboard must distinguish terminal history capture from Detailed');
+assert(dashboard.includes('orders complete'), 'dashboard checkpoint must include terminal-complete orders without calling them Detail captures');
+
 console.log('ui regression tests passed');

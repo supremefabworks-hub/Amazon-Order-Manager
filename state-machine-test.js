@@ -67,6 +67,45 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
   } catch (error) { missingLinkStopped = /Missing real View order details URL/.test(String(error.message || error)); }
   assert(missingLinkStopped, 'managed crawl must stop if a visible order lacks its real View order details URL');
 
+
+
+  // A fully cancelled $0.00 order may legitimately have no Order Details link. Its own scoped
+  // history card is terminal evidence and must not block the page, while normal orders still do.
+  await sandbox.startOrResumeFullScan({ restart: true, startYear: 2026 });
+  const cancelledId = '112-3886192-2097013';
+  const normalId = '113-3000000-3000000';
+  const page6Url = 'https://www.amazon.com/gp/your-account/order-history#time/2026/pagination/6/';
+  await sandbox.queueManagedHistoryResult({
+    scannedUrl: page6Url,
+    historySelectedYear: 2026,
+    historyYears: [2026,2025],
+    historyOrderIds: [cancelledId, normalId],
+    detailLinks: [{ orderId: normalId, url: `https://www.amazon.com/your-orders/order-details?orderID=${normalId}` }],
+    records: [{
+      recordId: `order:${cancelledId}`, recordType: 'order', orderId: cancelledId,
+      purchaseAmount: 0, statusText: 'Cancelled', historyTerminalComplete: true,
+      historyTerminalState: 'cancelled', historyTerminalSource: 'order-history-card',
+      orderDetailsUrl: null, sourceUrl: page6Url
+    }]
+  }, { historyYear: 2026, historyPage: 6, crawlManaged: true });
+  state = store.backgroundScanState;
+  assert(Boolean(state.crawl.completedOrders[cancelledId]), 'proven terminal cancelled order must count complete without Detail URL');
+  assert(state.crawl.completedOrders[cancelledId].terminalState === 'cancelled', 'terminal completion must record cancelled state');
+  assert(state.crawl.currentPageCompleted === 1, 'page completion count must include terminal cancelled order');
+  assert(state.queue.filter(j => j.type === 'detail' && j.orderId === normalId).length === 1, 'normal order must still queue its real Detail URL');
+  assert(state.queue.filter(j => j.type === 'detail' && j.orderId === cancelledId).length === 0, 'terminal cancelled order must not queue a nonexistent Detail URL');
+
+  await sandbox.startOrResumeFullScan({ restart: true, startYear: 2026 });
+  let nonzeroCancelledStopped = false;
+  try {
+    await sandbox.queueManagedHistoryResult({
+      scannedUrl: page6Url, historySelectedYear: 2026, historyYears: [2026], historyOrderIds: [cancelledId], detailLinks: [],
+      records: [{ recordId:`order:${cancelledId}`, recordType:'order', orderId:cancelledId, purchaseAmount:12.34, statusText:'Cancelled', historyTerminalComplete:true, historyTerminalState:'cancelled', orderDetailsUrl:null, sourceUrl:page6Url }]
+    }, { historyYear:2026, historyPage:6, crawlManaged:true });
+  } catch (error) { nonzeroCancelledStopped = /Missing real View order details URL/.test(String(error.message || error)); }
+  assert(nonzeroCancelledStopped, 'nonzero/invalid cancelled record must not bypass strict missing-Detail stop');
+
+
   store.ledger = [{ recordId:'order:test', orderId:'113-0000000-0000000' }];
   store.backgroundScanState = { running:true };
   store.installedExtensionVersion = '0.16.0';

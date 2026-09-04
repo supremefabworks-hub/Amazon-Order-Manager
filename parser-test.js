@@ -523,3 +523,15 @@ const affirmativeRefund = p.parseTextRecord('Return complete\nYour refund has be
 assert(affirmativeRefund.returnStage === 'refund_issued', 'affirmative refund-issued sentence must still promote lifecycle');
 assert(/refund has been issued/i.test(affirmativeRefund.statusText || ''), 'affirmative refund-issued sentence must remain visible status evidence');
 console.log('v0.18.3 parser live regressions passed');
+
+
+// v0.18.4 terminal cancelled-order regressions
+const cancelledOrderId = '112-3886192-2097013';
+const cancelledCardText = `Order placed\nJune 10, 2026\nTotal\n$0.00\nPlaced by\nVadya\nOrder # ${cancelledOrderId}\nCancelled\nHHZL Rubber Edge Trim T Molding Seal Strip`;
+const cancelledEvidence = p.terminalCancelledHistoryEvidence(cancelledCardText, cancelledOrderId);
+assert(cancelledEvidence.complete === true, 'exact Cancelled + $0.00 + same Order ID must be a terminal history order');
+assert(cancelledEvidence.total === 0, 'terminal cancellation must preserve exact $0.00 order total');
+assert(p.terminalCancelledHistoryEvidence(cancelledCardText.replace('$0.00', '$12.34'), cancelledOrderId).complete === false, 'nonzero cancelled order must still require Order Details');
+assert(p.terminalCancelledHistoryEvidence(cancelledCardText.replace('\nCancelled\n', '\nCancellation requested\n'), cancelledOrderId).complete === false, 'ambiguous cancellation prose must not satisfy terminal gate');
+assert(p.terminalCancelledHistoryEvidence(cancelledCardText.replace(cancelledOrderId, '112-0000000-0000000'), cancelledOrderId).complete === false, 'terminal evidence must be bound to the same visible Order ID');
+console.log('v0.18.4 terminal cancellation parser regressions passed');

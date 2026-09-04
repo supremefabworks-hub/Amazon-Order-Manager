@@ -98,7 +98,7 @@
     backgroundStatus.className = `result ${state.lastError ? 'warn' : 'ok'}`;
     const pageOrders=(crawl.currentPageOrderIds||[]).length;
     checkpointStatus.textContent = crawl.currentYear
-      ? `${crawl.currentYear} · page ${crawl.currentPage || 1} · ${crawl.currentPageCompleted || 0}/${pageOrders || '?'} order details · ${crawl.ordersCompleted || 0} unique completed · ${crawl.overlapCount || 0} overlaps${crawl.lastCompletedOrderId ? ` · last ${crawl.lastCompletedOrderId}` : ''}`
+      ? `${crawl.currentYear} · page ${crawl.currentPage || 1} · ${crawl.currentPageCompleted || 0}/${pageOrders || '?'} orders complete · ${crawl.ordersCompleted || 0} unique completed · ${crawl.overlapCount || 0} overlaps${crawl.lastCompletedOrderId ? ` · last ${crawl.lastCompletedOrderId}` : ''}`
       : 'No lifetime scan checkpoint yet.';
     if (crawl.active && !state.paused) scanToggleButton.textContent = 'Stop lifetime scan';
     else if (crawl.active && state.paused) scanToggleButton.textContent = 'Resume lifetime scan';

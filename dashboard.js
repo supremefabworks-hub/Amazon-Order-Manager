@@ -144,6 +144,7 @@
       const manualReconciled = returnRecords.some(r => r.manualState === 'reconciled');
       const ranks = returnRecords.map(r => storage.returnStageRank(r));
       const hasReturn = returnRecords.length > 0;
+      const terminalCancelled = Boolean(order?.historyTerminalComplete === true && order?.historyTerminalState === 'cancelled');
       const allCredited = hasReturn && returnRecords.every(r => storage.isCreditConfirmed(r));
       const allIssued = hasReturn && ranks.every(rank => rank >= storage.RETURN_STAGE_RANK.refund_issued);
 
@@ -164,7 +165,8 @@
 
       let stateKey = 'purchase';
       let statusLabel = order?.statusText || (order?.detailScanComplete ? 'Order details captured' : 'Order discovered');
-      if (manualReconciled) { stateKey = 'reconciled'; statusLabel = 'Reconciled'; }
+      if (terminalCancelled && !hasReturn) { stateKey = 'cancelled'; statusLabel = 'Cancelled'; }
+      else if (manualReconciled) { stateKey = 'reconciled'; statusLabel = 'Reconciled'; }
       else if (needsReview) {
         stateKey = 'needs_review';
         if (refundAmountMismatch) statusLabel = 'Refund amount mismatch';
@@ -182,7 +184,7 @@
       const lastScannedAt = [order?.lastScannedAt, ...returnRecords.map(r => r.lastScannedAt)].filter(Boolean).sort().at(-1) || null;
       const itemNames = hasReturn ? returnedItemNames : orderItemNames;
       rows.push({
-        orderId, order, returns: returnRecords, returnGroups, hasReturn, needsReview, stateKey, statusLabel,
+        orderId, order, returns: returnRecords, returnGroups, hasReturn, needsReview, terminalCancelled, stateKey, statusLabel,
         itemNames, orderItemNames, returnedItemNames, searchItemNames: uniqueStrings([...orderItemNames, ...returnedItemNames]),
         orderTotal: order?.purchaseAmount ?? null, refundAmount, canonicalRefundTotal, childRefundAmount,
         refundAmountMismatch, itemIdentityConflict, groupAmountConflict,
@@ -295,6 +297,7 @@
 
   function badgeLabel(row) {
     if (row.stateKey === 'purchase') return row.detailComplete ? 'Order' : 'Order queued';
+    if (row.stateKey === 'cancelled') return 'Cancelled';
     if (row.stateKey === 'needs_review') return row.statusLabel || 'Needs review';
     if (row.stateKey === 'refund_issued') return 'Refund issued';
     if (row.stateKey === 'credited') return 'Credited';
@@ -307,9 +310,11 @@
     empty.classList.toggle('hidden', rows.length !== 0);
     body.innerHTML = rows.map(row => {
       const items = row.itemNames.length ? row.itemNames.join(' · ') : (row.hasReturn ? `${row.returnGroups.length} return${row.returnGroups.length === 1 ? '' : 's'} pending item identity` : 'Item title pending Order Details scan');
-      const detailBadge = row.detailComplete
-        ? `<span class="badge badge-reconciled">Detailed</span>`
-        : '<span class="badge">Detail queued</span>';
+      const detailBadge = row.terminalCancelled
+        ? `<span class="badge">Terminal history</span>`
+        : row.detailComplete
+          ? `<span class="badge badge-reconciled">Detailed</span>`
+          : '<span class="badge">Detail queued</span>';
       const bankConfirmed = row.hasReturn && row.returns.length && row.returns.every(ret => storage.isCreditConfirmed(ret));
       const anyIssued = row.hasReturn && row.returns.some(ret => storage.returnStageRank(ret) >= storage.RETURN_STAGE_RANK.refund_issued);
       const financialState = bankConfirmed
