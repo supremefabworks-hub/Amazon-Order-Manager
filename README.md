@@ -2,7 +2,7 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.13 candidate for Issue #37.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.14 candidate for Issue #39.** GitHub is the source of truth and chat sessions are disposable.
 
 Current live acceptance trackers:
 
@@ -13,6 +13,8 @@ Current live acceptance trackers:
 - **#31 — v0.18.10 acceptance** for consolidated dashboard metrics and four user-facing views: Orders, Returns, Return review, Errors.
 - **#33 — v0.18.11 acceptance** for replacement detection and replacement-vs-return separation.
 - **#35 — v0.18.12 acceptance** for adaptive smart-fast serial crawl pacing and rate-limit safety.
+- **#37 — v0.18.13 acceptance** for combined Reset & Refresh and live installed-version display.
+- **#39 — v0.18.14 acceptance** for durable checkpoint resume, ledger-backed overlap recovery, and opt-in Amazon Auto-start.
 
 Updater Issue **#10 is closed** after unattended live update from v0.18.3 to v0.18.4 succeeded on the second Windows PC.
 
@@ -23,9 +25,9 @@ Use [`NEW_CHAT_PROMPT.md`](NEW_CHAT_PROMPT.md). `SESSION_PROTOCOL.md` defines ma
 ## Resume development
 
 1. Read `AGENTS.md`, `PROJECT_HANDOFF.md`, `README.md`, `TESTING.md`, and `SESSION_PROTOCOL.md`.
-2. Read Issues #7, #23, #25, #29, #31, #33, #35, and #37 and any newer issue that supersedes their scope.
+2. Read Issues #7, #23, #25, #29, #31, #33, #35, #37, and #39 and any newer issue that supersedes their scope.
 3. Inspect root source, `manifest.json`, recent commits, open PRs/issues, and tests before editing.
-4. Root v0.18.13 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
+4. Root v0.18.14 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
 5. Run `npm test` before packaging or merging changes.
 6. Every user-testable development revision must bump both `manifest.json` and `package.json` to the same newer Chrome version.
 7. Keep implementation, regression tests, docs, issue state, and handoff synchronized.
@@ -123,9 +125,10 @@ v0.18.1 does not loosen the v0.17 Amazon data contract. It additionally hardens 
 
 ### Canonical orders
 
-- Every visible history order must use its real Amazon `View order details` URL.
+- Every normal visible history order must resolve to a real Amazon `View order details` URL.
 - The extension never synthesizes missing canonical detail URLs.
-- A managed crawl stops if a visible Order ID lacks its real detail link.
+- During resume/recovery, a previously captured real canonical Order Details URL may be reused for the same known Order ID if the current history card temporarily omits its action. This is stored Amazon evidence, not URL synthesis.
+- A managed crawl stops if a normal visible Order ID has neither a current real detail link nor a previously captured real canonical Detail URL.
 - `Detailed` means a complete matching canonical detail capture, not merely a discovered order or a detail-shaped URL.
 
 ### Strict lifetime crawler
@@ -154,15 +157,15 @@ Crawler order is mandatory:
 
 Card last four is extracted only from payment-method/payment-information evidence. Whole-page arbitrary four-digit text is not a fallback.
 
-### Per-order Refresh and dashboard
+### Per-order recovery and dashboard
 
-Every row uses the fixed `Details | Credit | Reset & Refresh` action group. `Reset & Refresh` clears all derived data for that Order ID while preserving only the real captured Order Details route, then rebuilds the order from Amazon; failures remain visible in Errors with the route preserved. `Refresh` uses the stored real Order Details URL, opens an inactive Amazon tab, parses rendered canonical details, follows real same-order return-status links when present, saves fresh state, and closes the temporary tab.
+Every row uses the fixed `Details | Credit | Reset & Refresh` action group. `Reset & Refresh` clears derived data for that Order ID while preserving only the real captured Order Details route, then rebuilds canonical Order Details and legitimate same-order return children in an inactive Amazon tab. Failures remain visible in Errors with the real route preserved, and the temporary tab is always closed before the serial worker lock is released.
 
-Completed-data views are `All orders`, `Returns`, and `Needs review`; incomplete work is isolated in `Processing` and terminal per-order failures in `Errors`. No order container may scroll horizontally. Needs Review dollars equal the expected-refund sum for return records currently flagged for review.
+User-facing completed-data views are exactly `Orders`, `Returns`, `Return review`, and `Errors`. Incomplete non-error orders remain internal/hidden until complete. No order container may scroll horizontally. Return review dollars equal the expected-refund sum for return records currently flagged for review.
 
-### Development reset policy
+### Development state migration policy
 
-During active development, changing the manifest version wipes ledger/crawl/worker/workflow/bank-verification state and stores the new version. This remains intentional for v0.18 testing and must be replaced with migrations before production persistence is expected.
+As of v0.18.14, development version updates preserve canonical ledger data, bank verification evidence, and the exact lifetime-crawl checkpoint. The updater may clear/close stale transient worker-tab identity, then resumes active unpaused work from the persisted current job/year/page/fingerprint. Earlier v0.18 builds intentionally used destructive version resets; that policy is superseded and must not be reintroduced.
 
 ## Validation
 
@@ -191,7 +194,7 @@ Documented SHA-256:
 
 ## v0.18.5 terminal cancelled-order handling
 
-Amazon can render a fully cancelled `$0.00` order in Order History without any `View order details` URL. v0.18.5 adds a narrow terminal-history exception: only a scoped history card proving the same Order ID, an exact `Cancelled`/`Canceled` state, an exact `$0.00` total, and no real Order Details link may satisfy the managed crawl page gate. It is saved with `historyTerminalComplete=true` / `historyTerminalState=cancelled`, remains `detailScanComplete=false`, counts toward lifetime unique-order completion, and renders as `Cancelled` / `Terminal history` with Details and Refresh disabled. Any normal, ambiguous, nonzero, or unknown-total missing-link order still hard-stops the crawler rather than inventing a URL.
+Amazon can render a fully cancelled `$0.00` order in Order History without any `View order details` URL. v0.18.5 adds a narrow terminal-history exception: only a scoped history card proving the same Order ID, an exact `Cancelled`/`Canceled` state, an exact `$0.00` total, and no real Order Details link may satisfy the managed crawl page gate. It is saved with `historyTerminalComplete=true` / `historyTerminalState=cancelled`, remains `detailScanComplete=false`, counts toward lifetime unique-order completion, and renders as `Cancelled` / `Terminal history` with Details and Reset & Refresh disabled. Any normal, ambiguous, nonzero, or unknown-total missing-link order still hard-stops the crawler rather than inventing a URL.
 
 Issue #19 tracks live acceptance using order `112-3886192-2097013` as the observed case. This release is also intended as the automatic updater test from a fresh v0.18.3 installation on the second Windows PC.
 
@@ -240,3 +243,12 @@ v0.18.12 speeds the default crawler without adding concurrency. Inter-job delay 
 ## v0.18.13 authoritative Reset & Refresh and dynamic version display
 
 Separate Reset and Refresh controls are replaced by one `Reset & Refresh` recovery action. It preserves only the selected Order ID and captured real Order Details URL, removes all stored product/return/refund/replacement/bank/manual derived state, reopens the order as incomplete, and immediately rebuilds it from canonical Amazon evidence using the existing serial crawler lock. A failed rebuild remains in Errors with the real Details URL so retry remains possible. The dashboard header no longer hard-codes a historical version; it renders `chrome.runtime.getManifest().version_name || version` from the installed build. Issue #37 tracks live acceptance.
+
+
+## v0.18.14 durable checkpoint resume and Amazon Auto-start
+
+An active lifetime crawl now resumes from its persisted year/page/history URL and Order-ID checkpoint even if the MV3 worker, Chrome, or inactive Amazon worker tab disappears. An interrupted `currentJob` is requeued exactly once; an active empty queue is reconstructed from the saved checkpoint instead of starting current-year page 1. Visible duplicate Order IDs act as resume anchors: a completed overlap can be authoritatively refreshed once, but it is never counted as a new order or used to restart traversal.
+
+`Auto-start: On/Off` is opt-in and defaults OFF. When enabled, loading an active user Amazon tab starts or resumes incomplete lifetime work in a separate inactive worker tab. Worker/inactive tabs cannot recursively trigger Auto-start, explicit Stop latches until manual Start/Resume or Restart, and a completed lifetime scan is not automatically restarted on every Amazon navigation.
+
+v0.18.14 also replaces destructive development-version resets with migration-preserved ledger/crawl state. Version updates clear stale transient worker-tab identity but keep canonical orders, returns, bank verification, and the exact crawl checkpoint so the updater itself no longer destroys resume progress. Issue #39 tracks live acceptance.

@@ -1,8 +1,8 @@
 {
   "name": "amazon-order-manager",
-  "version": "0.18.13",
+  "version": "0.18.14",
   "private": true,
-  "description": "Amazon / Amazon Business complete-order ledger with adaptive serial crawling, authoritative Reset & Refresh recovery, return/replacement separation, filtering, bank verification, and verified development updates",
+  "description": "Amazon / Amazon Business complete-order ledger with durable checkpoint and ledger-backed resume, opt-in Amazon Auto-start, adaptive serial crawling, authoritative return/replacement separation, and verified development updates",
   "scripts": {
     "test": "node parser-test.js && node payment-evidence-test.js && node multi-return-test.js && node storage-test.js && node item-model-test.js && node background-test.js && node state-machine-test.js && node reconciliation-test.js && node ui-test.js && node dev-updater-test.js && node updater-reliability-test.js && node release-test.js",
     "check": "npm test"

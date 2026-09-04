@@ -4,7 +4,7 @@
 
 Chrome Manifest V3 Amazon / Amazon Business Order Manager and Refund Ledger.
 
-**Current source baseline: v0.18.3 candidate for Issue #17.** Root source remains the active development source. The exact pre-GitHub v0.16.0 archive under `source-snapshots/v0.16.0/full/` is historical recovery material only.
+**Current source baseline: v0.18.14 candidate for Issue #39.** Root source remains the active development source. The exact pre-GitHub v0.16.0 archive under `source-snapshots/v0.16.0/full/` is historical recovery material only. Historical release sections below describe behavior at those versions; the newest v0.18.14 handoff section and current root code supersede older operational policies where they conflict.
 
 v0.18 preserves the complete v0.17 Amazon crawler/details/returns/dashboard contract and adds a verified Windows development auto-update channel.
 
@@ -470,3 +470,12 @@ Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is expli
 - Reset & Refresh preserves only Order ID + real captured Order Details URL, deletes order-scoped derived ledger state, and rebuilds under the same single-job lock.
 - Failed rebuilds keep a minimal Errors-view shell and never invent a URL.
 - Dashboard version is derived dynamically from the installed manifest; no hard-coded release number belongs in dashboard HTML.
+
+
+## v0.18.14 durable resume / Auto-start candidate
+- Issue #39 tracks live acceptance.
+- `Start / resume`, browser startup, and version-update recovery use the persisted current year/page/history URL and Order-ID fingerprint; only explicit Restart resets traversal to current-year page 1.
+- Interrupted persisted `currentJob` is requeued once. Active empty queues self-reconstruct from the checkpoint.
+- Completed IDs encountered on a recovered/overlap page are refresh anchors, not new orders; refresh at most once per lifetime run and continue.
+- Auto-start defaults OFF and only reacts to active user Amazon tabs; inactive/worker tabs cannot recursively trigger it. Manual Stop latches until explicit manual resume/restart.
+- v0.18.14 preserves ledger/crawl state across development version updates and clears only transient worker-tab identity.

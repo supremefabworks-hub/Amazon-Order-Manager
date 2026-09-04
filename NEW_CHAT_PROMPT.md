@@ -14,20 +14,17 @@ This chat is disposable. Do **not** rely on memory or assumptions from any previ
 2. Read `PROJECT_HANDOFF.md` completely.
 3. Read `README.md` and `TESTING.md`.
 4. Read `SESSION_PROTOCOL.md`.
-5. Read GitHub Issues **#7**, **#10**, **#13**, and **#15** plus any newer open issue that supersedes either scope.
+5. Read current GitHub Issues **#7**, **#23**, **#29**, **#31**, **#33**, **#35**, **#37**, and **#39**, plus any newer issue that supersedes their scope. Issue #10 is closed updater history.
 6. Inspect the current root source tree, manifest/package version, recent commits, open PRs/issues, GitHub development releases, and tests before making changes.
 7. Treat the repository and GitHub issues as authoritative if anything in this prompt becomes stale.
 
 ## Current baseline
 
-The complete root source baseline is **v0.18.3 candidate for Issue #17**. The exact v0.16.0 package under `source-snapshots/v0.16.0/full/` is historical recovery/audit material only and must not replace the complete current root unless an intentional rollback is explicitly required.
+The complete root source baseline is **v0.18.14 candidate for Issue #39**. The exact v0.16.0 package under `source-snapshots/v0.16.0/full/` is historical recovery/audit material only and must not replace the complete current root unless an intentional rollback is explicitly required.
 
 v0.18 preserves the v0.17 authoritative Amazon behavior and adds the verified Windows development auto-update channel.
 
-Two live-validation tracks remain separate:
-
-- Issue #7 stays open until the documented live Amazon Business acceptance checklist in `TESTING.md` passes.
-- Issue #10 stays open until the one-time Windows native-updater bootstrap and one subsequent real automatic update to a strictly newer version both pass.
+Current live validation is centered on Issue #39 (durable checkpoint resume / Auto-start / state-preserving upgrade) while Issue #7 remains the broad Amazon Business acceptance tracker. Updater Issue #10 is closed after unattended update proof.
 
 ## Development auto-update contract
 
@@ -49,7 +46,7 @@ After bootstrap, do not manually overwrite the `current` folder. The updater own
 
 Every user-testable revision must bump **both** `manifest.json` and `package.json` to the same strictly newer Chrome version before merge. Main CI publishes the corresponding `dev-v<version>` prerelease only after tests pass. Do not overwrite an existing development release for another commit; bump the version instead.
 
-The updater is development-only. Do not turn it into a remote-JavaScript loader. Do not place GitHub credentials, Amazon credentials/cookies, bank credentials/tokens, or private keys in the extension/updater. Before production, remove/disable the local updater, replace destructive development version resets with migrations, and use the Chrome Web Store update channel.
+The updater is development-only. Do not turn it into a remote-JavaScript loader. Do not place GitHub credentials, Amazon credentials/cookies, bank credentials/tokens, or private keys in the extension/updater. Before production, remove/disable the local updater, retain explicit tested storage migrations for schema changes, and use the Chrome Web Store update channel.
 
 
 ## v0.18.3 live acceptance additions
@@ -150,3 +147,7 @@ The v0.18.12 default crawler is serial and adaptive: 75–250 ms inter-job delay
 
 ### Order recovery action
 Use one `Reset & Refresh` action only. It is an authoritative rebuild: preserve only the Order ID and captured real Order Details route, clear all order-scoped derived ledger data, then rebuild from Amazon under the serial worker lock. A failed rebuild must remain retryable in Errors. Dashboard version text must always come from the installed manifest, never a hard-coded string.
+
+
+### Durable resume / Auto-start rule
+Treat the persisted crawl checkpoint (year, page, current history URL, Order-ID fingerprint, completed IDs, queued/current job) as authoritative. Resume must never silently fall back to page 1 unless the user explicitly chooses Restart. Auto-start is opt-in, reacts only to active user Amazon tabs, uses a separate inactive worker tab, respects manual Stop, and must not recursively trigger from extension-created worker tabs. Development upgrades preserve ledger/crawl state; transient tab IDs may be cleared.
