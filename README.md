@@ -2,12 +2,15 @@
 
 Chrome Manifest V3 extension for building a local Amazon / Amazon Business order and refund ledger from the authenticated browser session.
 
-**Current source baseline: v0.18.7 candidate for Issue #19.** GitHub is the source of truth and chat sessions are disposable.
+**Current source baseline: v0.18.7 candidate for Issue #25.** GitHub is the source of truth and chat sessions are disposable.
 
-Two issues remain intentionally separate:
+Current live acceptance trackers:
 
-- **#7 — live Amazon Business acceptance** for the authoritative v0.17 crawler/return behavior that remains unchanged in v0.18.
-- **#10 — verified development auto-update pipeline** for the v0.18 local update workflow. Its code/test scope is implemented, but the one-time Windows bootstrap and one subsequent automatic update must be live-validated before the issue closes.
+- **#7 — live Amazon Business acceptance** for the authoritative crawler/return behavior.
+- **#23 — final-page year rollover acceptance** proving a disabled `Next` ends the current year and starts the next older year.
+- **#25 — v0.18.7 acceptance** for evidence-safe return milestones, faster serial crawl pacing, and per-product order status.
+
+Updater Issue **#10 is closed** after unattended live update from v0.18.3 to v0.18.4 succeeded on the second Windows PC.
 
 ## Start a completely new chat
 
@@ -16,9 +19,9 @@ Use [`NEW_CHAT_PROMPT.md`](NEW_CHAT_PROMPT.md). `SESSION_PROTOCOL.md` defines ma
 ## Resume development
 
 1. Read `AGENTS.md`, `PROJECT_HANDOFF.md`, `README.md`, `TESTING.md`, and `SESSION_PROTOCOL.md`.
-2. Read Issues #7 and #10 and any newer issue that supersedes either scope.
+2. Read Issues #7, #23, and #25 and any newer issue that supersedes their scope.
 3. Inspect root source, `manifest.json`, recent commits, open PRs/issues, and tests before editing.
-4. Root v0.18.5 is the active candidate for the terminal-cancelled-order live fix. The archived v0.16.0 ZIP is recovery material only.
+4. Root v0.18.7 is the active candidate. The archived v0.16.0 ZIP is recovery material only.
 5. Run `npm test` before packaging or merging changes.
 6. Every user-testable development revision must bump both `manifest.json` and `package.json` to the same newer Chrome version.
 7. Keep implementation, regression tests, docs, issue state, and handoff synchronized.
@@ -76,7 +79,7 @@ The native updater, stable development ID policy, and destructive development ve
 
 v0.18.3 addresses live Amazon Business findings after v0.18.2: captured legacy `/gp/css/summary/edit.html?orderID=...` links are accepted as real canonical Order Details routes; strict missing-link failures now name the exact Order ID(s); same-`itemId` title variation no longer creates false item conflicts unless non-empty ASIN evidence contradicts; dashboard return-group identity prefers the exact Order Details return-link binding; and bare static `Refund issued` timeline labels cannot appear as affirmative refund-issued status text. Long status badges wrap within the fixed column.
 
-This release is also the unattended updater proof from repaired v0.18.2. Do not manually replace `current` or press Reload when `dev-v0.18.3` publishes.
+The updater path introduced here was later proven live by an unattended v0.18.3 -> v0.18.4 update on the second Windows PC.
 
 ## v0.18.2 multi-return model
 
@@ -108,7 +111,7 @@ The dashboard therefore:
 
 Because the prior installed channel did not update itself from v0.18.0 to v0.18.1, install the v0.18.2 updater/bootstrap package once on the Windows test PC to repair the channel. The popup now exposes updater current/latest/check/error state and **Check development update now**. The native host writes `updater.log` under the updater install root, supports `--self-test`, and `Install.ps1 -DiagnoseOnly` runs local diagnostics.
 
-A later strictly newer release must update unattended from the repaired v0.18.2 installation before Issue #10 can close.
+Issue #10 is closed: the repaired channel later completed an unattended v0.18.3 -> v0.18.4 update on the second Windows PC without reinstalling or manually reloading the extension.
 
 ## Core v0.17/v0.18 product architecture
 
