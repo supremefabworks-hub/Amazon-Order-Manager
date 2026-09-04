@@ -4,7 +4,7 @@
 
 Chrome Manifest V3 Amazon / Amazon Business Order Manager and Refund Ledger.
 
-**Current source baseline: v0.18.3 candidate for Issue #17.** Root source remains the active development source. The exact pre-GitHub v0.16.0 archive under `source-snapshots/v0.16.0/full/` is historical recovery material only.
+**Current source baseline: v0.18.14 candidate for Issue #39.** Root source remains the active development source. The exact pre-GitHub v0.16.0 archive under `source-snapshots/v0.16.0/full/` is historical recovery material only. Historical release sections below describe behavior at those versions; the newest v0.18.14 handoff section and current root code supersede older operational policies where they conflict.
 
 v0.18 preserves the complete v0.17 Amazon crawler/details/returns/dashboard contract and adds a verified Windows development auto-update channel.
 

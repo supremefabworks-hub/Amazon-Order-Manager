@@ -2,12 +2,13 @@
 
 ## Current test target
 
-**v0.18.3** is the current live-fix target for Issue #17. It preserves the v0.17 Amazon crawler/return contract, retains the verified local development auto-update channel, and fixes the live false payment-card last-four contamination found in v0.18.0.
+**v0.18.14** is the current live target for Issue #39. It preserves the authoritative Amazon crawler/return/replacement contract and v0.18.12 smart-fast serial pacing while adding durable checkpoint resume, ledger-backed recovery for already-known Order IDs, opt-in Amazon Auto-start, and state-preserving development-version migration.
 
-Two independent live boundaries remain:
+Current live boundaries include:
 
-- Issue #7: live Amazon Business acceptance of crawler/details/returns/UI behavior.
-- Issue #10: live Windows bootstrap plus one subsequent automatic development update.
+- Issue #39: interrupt/resume must continue from the saved current job/year/page instead of restarting page 1; ledger-known overlaps must refresh at most once and continue; Auto-start must use a separate inactive worker tab and respect manual Stop.
+- Issue #7: broad live Amazon Business acceptance of crawler/details/returns/UI behavior.
+- Issue #10 is closed after unattended updater proof; v0.18.14 must additionally prove that updater-driven version changes preserve the active ledger/crawl checkpoint.
 
 Automated regression coverage must pass before packaging or merging.
 
