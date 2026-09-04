@@ -741,3 +741,16 @@ const v0187MilestoneDom = { querySelectorAll(selector) { return selector.include
 const v0187DomDone = p.extractCompletedReturnMilestonesFromDom(v0187MilestoneDom);
 assert(v0187DomDone.started === true, 'Amazon checkmark next to Initiated must complete Initiated');
 assert(v0187DomDone.shipped === false && v0187DomDone.received === false && v0187DomDone.refundIssued === false, 'one Initiated checkmark must not spill into later static labels');
+
+
+// v0.18.8 Breville: three checkmarks mean Initiated, Dropped off, Return received only.
+const v0188BrevilleText = `Aug 7\nInitiated\nAug 31\nDropped off\nSep 2\nReturn received\nSep 10\nRefund issued\nSep 17\nRefund credited\nYour return was received`;
+const v0188Timeline = { innerText:v0188BrevilleText, textContent:v0188BrevilleText, querySelectorAll(selector){ return selector.includes('milestone_checkmark') ? [{},{},{}] : []; } };
+const v0188Dom = p.extractCompletedReturnMilestonesFromDom(v0188Timeline);
+assert(v0188Dom.started && v0188Dom.shipped && v0188Dom.received, 'three milestone checkmarks must complete first three Amazon stages');
+assert(!v0188Dom.refundIssued && !v0188Dom.credited, 'future unchecked Refund issued/credited labels must stay incomplete');
+const v0188Parsed = p.parseTextRecord(v0188BrevilleText, '113-1426991-3716216', {pageType:'return', url:'https://www.amazon.com/spr/returns/prep?orderId=113-1426991-3716216'});
+assert(v0188Parsed.returnStage === 'received', 'Breville affirmative received evidence must classify as received');
+assert(v0188Parsed.returnMilestones.received.done === true, 'received milestone must be explicit');
+assert(v0188Parsed.returnMilestones.refundIssued.done === false && v0188Parsed.returnMilestones.credited.done === false, 'future refund labels must not complete');
+console.log('v0.18.8 Breville lifecycle regressions passed');

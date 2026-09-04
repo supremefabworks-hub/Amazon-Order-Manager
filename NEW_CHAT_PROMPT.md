@@ -127,3 +127,7 @@ Amazon Order History year rollover is determined by scoped pager state. Disabled
 
 ### v0.18.7 durable addition
 Return milestone completion is evidence-safe: static timeline labels, future instructions, and policy/hypothetical prose never complete a milestone. Canonical Order Details persists structured purchased `orderItems`; the dashboard stays one order card with per-product status/return lifecycles. Normal crawl pacing is ~30% faster by shorter serial waits only, with concurrency/rate-limit/fingerprint/canonical-detail safeguards unchanged. Issue #25 tracks live acceptance.
+
+
+### v0.18.8 durable addition
+Amazon return lifecycle and bank credit verification are independent. Render five Amazon stages including Return received. Future/static labels do not complete stages; milestone checkmarks are leading-stage evidence. Bank evidence never promotes Amazon stage; bank-before-refund-issued is a review conflict. Issue #27 tracks acceptance.

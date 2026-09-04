@@ -148,8 +148,9 @@
       const ranks = returnRecords.map(r => storage.returnStageRank(r));
       const hasReturn = returnRecords.length > 0;
       const terminalCancelled = Boolean(order?.historyTerminalComplete === true && order?.historyTerminalState === 'cancelled');
-      const allCredited = hasReturn && returnRecords.every(r => storage.isCreditConfirmed(r));
+      const allAmazonCredited = hasReturn && ranks.every(rank => rank >= storage.RETURN_STAGE_RANK.credited);
       const allIssued = hasReturn && ranks.every(rank => rank >= storage.RETURN_STAGE_RANK.refund_issued);
+      const bankAmazonConflict = hasReturn && returnRecords.some(r => storage.hasAmazonBankConflict(r));
 
       const capturedOrderItemNames = uniqueStrings(order?.itemNames || []);
       const structuredOrderItemNames = uniqueStrings(itemJoin.items.map(item => item.itemName));
@@ -165,7 +166,7 @@
       const itemIdentityConflict = returnGroups.some(group => group.itemIdentityConflict);
       const groupAmountConflict = returnGroups.some(group => group.amountConflict);
       const needsReview = hasReturn && !manualReconciled && (
-        returnRecords.some(r => storage.needsCreditReview(r)) || refundAmountMismatch || itemIdentityConflict || groupAmountConflict || strongUnmatchedReturnIdentity
+        returnRecords.some(r => storage.needsCreditReview(r)) || refundAmountMismatch || itemIdentityConflict || groupAmountConflict || strongUnmatchedReturnIdentity || bankAmazonConflict
       );
 
       let stateKey = 'purchase';
@@ -178,11 +179,12 @@
         else if (itemIdentityConflict) statusLabel = 'Item needs review';
         else if (groupAmountConflict) statusLabel = 'Return refund needs review';
         else if (strongUnmatchedReturnIdentity) statusLabel = 'Returned item needs matching';
+        else if (bankAmazonConflict) statusLabel = 'Bank/Amazon status conflict';
         else {
           const lowest = returnRecords.slice().sort((a,b) => storage.returnStageRank(a)-storage.returnStageRank(b))[0];
           statusLabel = stageLabel(storage.getReturnStage(lowest));
         }
-      } else if (allCredited) { stateKey = 'credited'; statusLabel = 'Credited'; }
+      } else if (allAmazonCredited) { stateKey = 'credited'; statusLabel = 'Amazon credited'; }
       else if (allIssued) { stateKey = 'refund_issued'; statusLabel = 'Refund issued'; }
       else if (hasReturn) { stateKey = 'return'; statusLabel = stageLabel(storage.getReturnStage(returnRecords[0])); }
 
@@ -194,7 +196,7 @@
         itemStates: itemJoin.items, unmatchedReturnGroups: itemJoin.unmatchedReturnGroups, returnedProductCount: itemJoin.returnedProductCount,
         itemNames, orderItemNames, returnedItemNames, searchItemNames: uniqueStrings([...orderItemNames, ...returnedItemNames]),
         orderTotal: order?.purchaseAmount ?? null, refundAmount, canonicalRefundTotal, childRefundAmount,
-        refundAmountMismatch, itemIdentityConflict, groupAmountConflict, strongUnmatchedReturnIdentity,
+        refundAmountMismatch, itemIdentityConflict, groupAmountConflict, strongUnmatchedReturnIdentity, bankAmazonConflict,
         cardLast4: order?.cardLast4 || returnRecords.find(r => r.cardLast4)?.cardLast4 || null,
         amazonStatus: statusTexts.length ? statusTexts.join(' · ') : (order?.statusText || order?.status || '—'),
         detailComplete: Boolean(order?.detailScanComplete), detailScannedAt: order?.detailScannedAt || null,
@@ -211,23 +213,21 @@
   function lifecycleMarkup(group, index, totalGroups) {
     const record = group.representative;
     const progress = storage.returnProgress(record);
-    const expectedCredit = !progress.credited ? storage.expectedCreditDate(record) || '' : '';
+    const expectedCredit = !progress.amazonCredited ? storage.expectedCreditDate(record) || '' : '';
     const verificationRecord = group.records.find(r => r.bankVerification) || record;
     const verification = verificationRecord.bankVerification || null;
-    const creditDate = progress.bankCreditConfirmed
-      ? (verification?.postedDate || verification?.verifiedAt || '')
-      : progress.amazonCredited
-        ? milestoneDate(record, 'credited')
-        : '';
     const steps = [
       ['started', 'Initiated', progress.started, milestoneDate(record, 'started')],
-      ['shipped', 'Dropped off', progress.shippedOrReceived, milestoneDate(record, 'shipped')],
+      ['shipped', 'Dropped off', progress.shipped, milestoneDate(record, 'shipped')],
+      ['received', 'Return received', progress.received, milestoneDate(record, 'received')],
       ['refundIssued', 'Refund issued', progress.refundIssued, milestoneDate(record, 'refundIssued')],
-      ['credited', progress.credited ? 'Bank credited' : (expectedCredit ? `Expected ${expectedCredit}` : 'Credit pending'), progress.credited, creditDate]
+      ['credited', progress.amazonCredited ? 'Refund credited' : (expectedCredit ? `Expected ${expectedCredit}` : 'Refund credited'), progress.amazonCredited, milestoneDate(record, 'credited')]
     ];
     const items = group.itemNames.length ? group.itemNames.join(' · ') : 'Returned item pending authoritative scan';
     let verificationMarkup = '';
-    if (verification) {
+    if (progress.amazonBankConflict) {
+      verificationMarkup = `<div class="bank-match bank-match-review"><strong>Bank/Amazon conflict</strong><span>Bank credit evidence exists before Amazon shows Refund issued. Verify the bank match.</span></div>`;
+    } else if (verification) {
       if (verification.status === 'confirmed') {
         const details = [verification.matchedAmount != null ? money(verification.matchedAmount) : '', verification.postedDate || '', verification.accountLast4 ? `•••• ${verification.accountLast4}` : ''].filter(Boolean).join(' · ');
         verificationMarkup = `<div class="bank-match bank-match-confirmed"><strong>Bank confirmed</strong>${details ? `<span>${esc(details)}</span>` : ''}</div>`;
@@ -240,13 +240,14 @@
       <div class="return-track-title">Return ${index}${totalGroups > 1 ? ` of ${totalGroups}` : ''} · ${esc(items)}</div>
       <div class="return-track-meta"><span>${esc(stageLabel(storage.getReturnStage(record)))}</span><strong>${money(group.amount)}</strong></div>
       ${warnings ? `<div class="muted tiny">${esc(warnings)}</div>` : ''}
-      <div class="lifecycle lifecycle-lineitem">
+      <div class="lifecycle lifecycle-lineitem lifecycle-five">
         <div class="lifecycle-line"><span style="width:${progress.percent}%"></span></div>
         ${steps.map(step => `<div class="life-step ${step[2] ? 'done' : ''}"><small>${esc(step[3] || '')}</small><i>${step[2] ? '✓' : ''}</i><span>${esc(step[1])}</span></div>`).join('')}
       </div>
       ${verificationMarkup}
     </div>`;
   }
+
   function legacyReturnProgressMarkup(row) {
     if (!row.returnGroups.length) return '<span class="muted">—</span>';
     return `<div class="return-track-stack compact-return-stack">${row.returnGroups.map((group, index) => lifecycleMarkup(group, index + 1, row.returnGroups.length)).join('')}</div>`;
@@ -314,7 +315,7 @@
     const reviewRows = rows.filter(r => r.needsReview);
     const detailed = rows.filter(r => r.detailComplete);
     const issued = rows.filter(r => r.hasReturn && r.returns.every(ret => storage.returnStageRank(ret) >= storage.RETURN_STAGE_RANK.refund_issued));
-    const credited = rows.filter(r => r.hasReturn && r.returns.every(ret => storage.isCreditConfirmed(ret)));
+    const bankCredited = rows.filter(r => r.hasReturn && r.returns.every(ret => storage.isBankCreditConfirmed(ret)));
     const reviewExpectedTotal = reviewRows.reduce((total, row) => total + needsReviewExpectedAmount(row), 0);
     navAllCount.textContent = String(rows.length);
     navReturnCount.textContent = String(returnRows.length);
@@ -325,7 +326,7 @@
       <div class="stat"><span>Returns</span><strong>${returnRows.length}</strong><small>${money(sum(returnRows, 'refundAmount'))} expected refunds</small></div>
       <div class="stat stat-review-total"><span>Needs review</span><strong>${money(reviewExpectedTotal)}</strong><small>${reviewRows.length} flagged ${reviewRows.length === 1 ? 'order' : 'orders'}</small></div>
       <div class="stat"><span>Refund issued</span><strong>${issued.length}</strong><small>Amazon says refund issued</small></div>
-      <div class="stat"><span>Bank credited</span><strong>${credited.length}</strong><small>Bank evidence confirmed</small></div>`;
+      <div class="stat"><span>Bank credited</span><strong>${bankCredited.length}</strong><small>Bank evidence confirmed</small></div>`;
   }
 
   function renderViewMenu() {
@@ -337,7 +338,7 @@
     if (row.stateKey === 'cancelled') return 'Cancelled';
     if (row.stateKey === 'needs_review') return row.statusLabel || 'Needs review';
     if (row.stateKey === 'refund_issued') return 'Refund issued';
-    if (row.stateKey === 'credited') return 'Credited';
+    if (row.stateKey === 'credited') return 'Amazon credited';
     if (row.stateKey === 'reconciled') return 'Reconciled';
     return row.statusLabel || 'Return';
   }
@@ -355,13 +356,15 @@
         : row.detailComplete
           ? `<span class="badge badge-reconciled">Detailed</span>`
           : '<span class="badge">Detail queued</span>';
-      const bankConfirmed = row.hasReturn && row.returns.length && row.returns.every(ret => storage.isCreditConfirmed(ret));
+      const bankConfirmed = row.hasReturn && row.returns.length && row.returns.every(ret => storage.isBankCreditConfirmed(ret));
       const anyIssued = row.hasReturn && row.returns.some(ret => storage.returnStageRank(ret) >= storage.RETURN_STAGE_RANK.refund_issued);
-      const financialState = bankConfirmed
-        ? '<span class="credit-state credit-confirmed">Bank confirmed</span>'
-        : anyIssued
-          ? '<span class="credit-state credit-pending">Credit pending</span>'
-          : '';
+      const financialState = row.bankAmazonConflict
+        ? '<span class="credit-state credit-pending">Bank/Amazon conflict</span>'
+        : bankConfirmed
+          ? '<span class="credit-state credit-confirmed">Bank confirmed</span>'
+          : anyIssued
+            ? '<span class="credit-state credit-pending">Credit pending</span>'
+            : '';
       return `<article class="ledger-order-card ledger-order-line ${row.hasReturn ? 'return-card-row' : ''} ${row.needsReview ? 'needs-review-card' : ''}">
         <div class="line-status">
           <span class="badge badge-${esc(row.stateKey)}">${esc(badgeLabel(row))}</span>

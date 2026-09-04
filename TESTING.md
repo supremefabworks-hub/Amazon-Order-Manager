@@ -283,3 +283,10 @@ A user-testable development build may merge only after `npm test` and PR CI pass
 4. Verify a multi-product order (e.g. six purchased products / four returned) displays six product rows under one order, four with their own return lifecycles and two as `Not returned`.
 5. Confirm item quantity/price stay `—`/absent when Amazon does not directly prove them; no order-total allocation.
 6. Observe throughput improvement while confirming no duplicate page/order regression and no new rate-limit behavior.
+
+
+## v0.18.8 live acceptance
+1. Let updater install v0.18.8 and run a fresh scan.
+2. Breville `113-1426991-3716216` must show Initiated Aug 7, Dropped off Aug 31, Return received Sep 2 complete; Refund issued Sep 10 and Refund credited Sep 17 incomplete until Amazon checks them.
+3. Row/group label must be Return received, not Credited.
+4. Bank confirmation stays separate; bank-before-issued shows Bank/Amazon conflict / Needs Review.

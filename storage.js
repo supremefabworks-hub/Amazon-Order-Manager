@@ -134,6 +134,10 @@
     return Boolean(record && (returnStageRank(record) >= RETURN_STAGE_RANK.credited || isBankCreditConfirmed(record)));
   }
 
+  function hasAmazonBankConflict(record) {
+    return Boolean(record && isBankCreditConfirmed(record) && returnStageRank(record) < RETURN_STAGE_RANK.refund_issued);
+  }
+
   function expectedCreditDate(record) {
     return record?.expectedCreditDate || record?.returnMilestones?.expectedCreditDate || null;
   }
@@ -153,7 +157,9 @@
   function needsCreditReview(record, now = new Date()) {
     if (!record || record.recordType !== 'return') return false;
     if (record.itemIdentityConflict) return true;
-    if (record.manualState === 'reconciled' || isCreditConfirmed(record)) return false;
+    if (record.manualState === 'reconciled') return false;
+    if (hasAmazonBankConflict(record)) return true;
+    if (isCreditConfirmed(record)) return false;
     const rank = returnStageRank(record);
     if (rank < RETURN_STAGE_RANK.refund_issued) return true;
     const status = bankVerificationStatus(record);
@@ -167,18 +173,22 @@
   function returnProgress(record) {
     const stage = getReturnStage(record) || 'unknown';
     const rank = returnStageRank(stage);
-    const creditConfirmed = isCreditConfirmed(record);
+    const bankConfirmed = isBankCreditConfirmed(record);
+    const amazonCredited = rank >= RETURN_STAGE_RANK.credited;
     return {
-      stage,
-      rank,
-      percent: creditConfirmed ? 100 : rank >= 4 ? 67 : rank >= 2 ? 34 : 0,
+      stage, rank,
+      percent: rank >= 5 ? 100 : rank >= 4 ? 80 : rank >= 3 ? 60 : rank >= 2 ? 40 : rank >= 1 ? 20 : 0,
       started: rank >= 1,
+      shipped: rank >= 2,
       shippedOrReceived: rank >= 2,
+      received: rank >= 3,
       refundIssued: rank >= 4,
-      credited: creditConfirmed,
-      amazonCredited: rank >= 5,
-      bankCreditConfirmed: isBankCreditConfirmed(record),
+      credited: amazonCredited,
+      amazonCredited,
+      bankCreditConfirmed: bankConfirmed,
       bankVerificationStatus: bankVerificationStatus(record),
+      amazonBankConflict: hasAmazonBankConflict(record),
+      financialCreditConfirmed: amazonCredited || bankConfirmed,
       refunded: rank >= 4,
       milestones: record?.returnMilestones || null
     };
@@ -188,7 +198,7 @@
     if (!existing) return incoming || null;
     if (!incoming) return existing || null;
     const out = { ...existing, ...incoming };
-    for (const key of ['started', 'shipped', 'refundIssued', 'credited']) {
+    for (const key of ['started', 'shipped', 'received', 'refundIssued', 'credited']) {
       const a = existing[key] || {};
       const b = incoming[key] || {};
       out[key] = {
@@ -441,6 +451,7 @@
     bankVerificationStatus,
     isBankCreditConfirmed,
     isCreditConfirmed,
+    hasAmazonBankConflict,
     expectedCreditDate,
     needsCreditReview
   };

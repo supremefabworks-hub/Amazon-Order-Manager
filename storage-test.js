@@ -89,7 +89,8 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   const bankConfirmed = (await s.getLedger()).find(r => r.recordId === retBase.recordId);
   assert(s.isBankCreditConfirmed(bankConfirmed) === true, 'bank verification should confirm posted credit');
   assert(s.isCreditConfirmed(bankConfirmed) === true, 'bank confirmation should complete final credit milestone');
-  assert(s.returnProgress(bankConfirmed).credited === true, 'return progress should finish after bank confirmation');
+  assert(s.returnProgress(bankConfirmed).financialCreditConfirmed === true, 'bank confirmation should complete financial verification');
+  assert(s.returnProgress(bankConfirmed).credited === false, 'bank confirmation alone must not mark Amazon Refund credited complete');
   const bankSummary = s.summarizeLedger(await s.getLedger());
   assert(bankSummary.creditedOrders >= 1, 'bank-confirmed refund should count as credited');
 
@@ -160,6 +161,13 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   await s.upsertRecords([{ ...asinConflictBase, asins: ['B000000002'], itemNames: ['Different Product'], itemIdentitySource: 'return-page-item', itemAsinEvidenceSource: 'return-item-data-asin', provisionalReturn: false, authoritativeReturnCapture: true }]);
   const asinConflict = (await s.getLedger()).find(r => r.recordId === asinConflictBase.recordId);
   assert(asinConflict.itemIdentityConflict === true, 'contradictory non-empty ASIN evidence for the same returnItemId must remain reviewable');
+
+  const bankBeforeIssued = { recordId:'return:113-1426991-3716216:breville:item-jmpgppooriprsup', recordType:'return', orderId:'113-1426991-3716216', returnStage:'received', status:'returned_pending_refund', statusText:'Your return was received', returnMilestones:{stage:'received',started:{done:true,date:'Aug 7'},shipped:{done:true,date:'Aug 31'},received:{done:true,date:'Sep 2'},refundIssued:{done:false,date:null},credited:{done:false,date:null}}, bankVerification:{status:'confirmed',matchedAmount:700.36,postedDate:'2026-09-03'} };
+  assert(s.getReturnStage(bankBeforeIssued) === 'received', 'bank confirmation must not alter Amazon stage');
+  assert(s.returnProgress(bankBeforeIssued).received && !s.returnProgress(bankBeforeIssued).refundIssued && !s.returnProgress(bankBeforeIssued).amazonCredited, 'Amazon lifecycle must remain received');
+  assert(s.returnProgress(bankBeforeIssued).bankCreditConfirmed, 'bank evidence remains separately visible');
+  assert(s.hasAmazonBankConflict(bankBeforeIssued), 'bank credit before Amazon refund-issued must be conflict');
+  assert(s.needsCreditReview(bankBeforeIssued), 'bank/Amazon conflict must need review');
 
   console.log('storage tests passed');
 })().catch(error => { console.error(error); process.exit(1); });
