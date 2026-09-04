@@ -115,5 +115,7 @@ Start by reporting the current baseline/version, active issues/goals, whether ro
 ---
 
 
-### v0.18.4 terminal cancelled-order handling
+### v0.18.5 terminal cancelled-order handling
 Treat a scoped Order History card as terminal-complete without a Detail URL only when it proves the same Order ID, exact Cancelled/Canceled status, exact `$0.00` Total, and no real Detail link. Persist `historyTerminalComplete=true` / `historyTerminalState=cancelled`; never set `detailScanComplete` for this path. All other visible orders still require real captured Order Details URLs. Issue #19 tracks live acceptance.
+
+- v0.18.5: no-detail Order History cards use structural single-order scoping; broad return-page product links cannot create ASIN conflicts unless identity evidence is directly item-bound.

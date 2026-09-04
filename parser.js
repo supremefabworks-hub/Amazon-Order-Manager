@@ -394,6 +394,60 @@
     return best;
   }
 
+  function coherentSingleOrderHistoryCard(node, orderId) {
+    if (!node || !orderId) return false;
+    const text = normalizeText(node.innerText || node.textContent || '');
+    if (!text || text.length > 12000) return false;
+    const ids = extractOrderIds(text);
+    if (ids.length !== 1 || ids[0] !== orderId) return false;
+    const hasPlaced = /(?:^|\n)\s*Order placed\s*(?:$|\n)/im.test(text);
+    const hasTotal = /(?:^|\n)\s*Total\s*(?:$|\n)/im.test(text);
+    if (!hasPlaced || !hasTotal) return false;
+    let hasProduct = false;
+    try {
+      hasProduct = Array.from(node.querySelectorAll?.('a[href]') || []).some(a => /(\/dp\/|\/gp\/product\/|\/product\/)/i.test(String(a.getAttribute?.('href') || a.href || '')));
+    } catch (_) {}
+    const hasTerminalOrFulfillment = /(?:^|\n)\s*(?:cancelled|canceled|delivered(?:\s|$)|shipped(?:\s|$)|arriving(?:\s|$)) /im.test(`${text} `) || /(?:^|\n)\s*(?:cancelled|canceled)\s*(?:$|\n)/im.test(text);
+    return Boolean(hasProduct || hasTerminalOrFulfillment);
+  }
+
+  function structuralHistoryContainerForOrder(doc, orderId) {
+    if (!doc?.querySelectorAll || !orderId) return null;
+    const seeds = [];
+    const seen = new Set();
+    const selectors = ['[data-order-id]', '[data-orderid]', '[data-order-number]', 'span', 'a', 'div', 'li'];
+    for (const selector of selectors) {
+      let nodes = [];
+      try { nodes = Array.from(doc.querySelectorAll(selector)); } catch (_) {}
+      for (const node of nodes) {
+        if (!node || seen.has(node)) continue;
+        seen.add(node);
+        const text = normalizeText(node.innerText || node.textContent || '');
+        if (text.length > 360 || !text.includes(orderId)) continue;
+        const ids = extractOrderIds(text);
+        if (ids.length === 1 && ids[0] === orderId) seeds.push(node);
+      }
+    }
+
+    let best = null;
+    let bestLength = Infinity;
+    for (const seed of seeds) {
+      let current = seed;
+      for (let depth = 0; current && depth < 14; depth += 1, current = current.parentElement) {
+        const text = normalizeText(current.innerText || current.textContent || '');
+        const ids = extractOrderIds(text);
+        if (!ids.includes(orderId)) continue;
+        if (ids.length > 1) break;
+        if (text.length > 12000) break;
+        if (coherentSingleOrderHistoryCard(current, orderId) && text.length < bestLength) {
+          best = current;
+          bestLength = text.length;
+        }
+      }
+    }
+    return best;
+  }
+
   function historyContainerForOrder(doc, orderId) {
     if (!doc?.querySelectorAll || !orderId) return null;
     const matchingAnchors = Array.from(doc.querySelectorAll('a[href]')).filter(a => {
@@ -419,7 +473,7 @@
       }
       if (best) return best;
     }
-    return closestContainerForOrder(doc, orderId);
+    return structuralHistoryContainerForOrder(doc, orderId) || closestContainerForOrder(doc, orderId);
   }
 
   function excludedProductAnchor(a) {
@@ -433,20 +487,17 @@
     return false;
   }
 
-  function extractItemNamesFromContainer(container) {
-    if (!container || !container.querySelectorAll) return [];
-    const names = [];
+  function extractBoundProductEvidence(container) {
+    if (!container?.querySelectorAll) return [];
+    const out = [];
     const seen = new Set();
     const productLinks = Array.from(container.querySelectorAll('a[href*="/dp/"], a[href*="/gp/product/"], a[href*="/product/"]'));
-
     for (const a of productLinks) {
       if (excludedProductAnchor(a)) continue;
       const href = String(a.getAttribute('href') || a.href || '');
       const asin = href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?]|$)/i)?.[1]?.toUpperCase() || '';
+      if (!asin || seen.has(asin)) continue;
       let title = normalizeText(a.innerText || a.textContent || '');
-
-      // Port the working exporter fallbacks. Amazon frequently makes the image the product anchor,
-      // leaving the anchor text blank even though the title is present in a nearby node.
       if (!title || title.length < 5) {
         let parent = a.parentElement;
         for (let depth = 0; depth < 5 && parent; depth += 1, parent = parent.parentElement) {
@@ -460,15 +511,16 @@
         const img = a.querySelector?.('img') || a.parentElement?.querySelector?.('img');
         title = normalizeText(img?.getAttribute?.('alt') || img?.alt || '');
       }
-
       if (!title || title.length < 3 || title.length > 500) continue;
       if (/buy it again|view order|order details|track package|return or replace|write a product review|invoice|amazon business card|prime business/i.test(title)) continue;
-      const key = asin || title.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      names.push(title.slice(0, 400));
+      seen.add(asin);
+      out.push({ asin, itemName: title.slice(0, 400) });
     }
-    return names.slice(0, 30);
+    return out.slice(0, 30);
+  }
+
+  function extractItemNamesFromContainer(container) {
+    return extractBoundProductEvidence(container).map(entry => entry.itemName).slice(0, 30);
   }
 
   function extractAsins(container) {
@@ -492,7 +544,9 @@
     if (!container?.querySelectorAll) return [];
     const candidates = [];
     const seenElements = new Set();
-    for (const selector of ['[data-asin]', '[data-item-index]', '[class*="return-item" i]', '[class*="returnItem"]', '.a-box', '.a-section']) {
+    const selectors = ['[data-asin]', '[data-item-index]', '[class*="return-item" i]', '[class*="returnItem"]', '.a-box', '.a-section'];
+    for (const selector of selectors) {
+      const strongItemSelector = !['.a-box', '.a-section'].includes(selector);
       let nodes = [];
       try { nodes = Array.from(container.querySelectorAll(selector)); } catch (_) {}
       for (const el of nodes) {
@@ -501,22 +555,41 @@
         const text = normalizeText(el.innerText || el.textContent || '');
         if (text.length < 8 || text.length > 3600) continue;
         if (!/(?:quantity\s*:|return item|item\(s\) in your return request|refund (?:amount|subtotal)|estimated refund)/i.test(text)) continue;
-        const names = extractItemNamesFromContainer(el);
-        const fallback = names.length ? names : extractItemNamesFromText(text);
-        const itemName = fallback[0] || null;
-        const asin = extractAsins(el)[0] || null;
+
+        const textNames = extractItemNamesFromText(text);
+        const boundProducts = extractBoundProductEvidence(el);
+        const itemName = textNames[0] || boundProducts[0]?.itemName || null;
+        let asin = null;
+        let asinEvidenceSource = null;
+
+        if (strongItemSelector) {
+          const dataAsin = String(el.getAttribute?.('data-asin') || '').trim().toUpperCase();
+          if (/^[A-Z0-9]{10}$/.test(dataAsin)) {
+            asin = dataAsin;
+            asinEvidenceSource = 'return-item-data-asin';
+          } else if (boundProducts.length === 1) {
+            asin = boundProducts[0].asin;
+            asinEvidenceSource = 'return-item-direct-product-anchor';
+          }
+        }
+
         if (!itemName && !asin) continue;
         const refundAmount = findLabeledMoney(text, ['Item refund', 'Refund amount', 'Estimated refund', 'Refund subtotal']);
-        candidates.push({ itemName, asin, refundAmount, textLength: text.length });
+        candidates.push({ itemName, asin, asinEvidenceSource, refundAmount, textLength: text.length, strongItemSelector });
       }
     }
-    const byKey = new Map();
+    const deduped = [];
+    const scoreEntry = entry => (entry.asinEvidenceSource ? 100000 : 0) + (entry.strongItemSelector ? 10000 : 0) - entry.textLength;
+    const nameKey = entry => normalizeText(entry.itemName || '').toLowerCase();
     for (const entry of candidates) {
-      const key = entry.asin || String(entry.itemName || '').toLowerCase();
-      const prior = byKey.get(key);
-      if (!prior || entry.textLength < prior.textLength) byKey.set(key, entry);
+      const index = deduped.findIndex(prior =>
+        (entry.asin && prior.asin && entry.asin === prior.asin) ||
+        (nameKey(entry) && nameKey(entry) === nameKey(prior))
+      );
+      if (index < 0) deduped.push(entry);
+      else if (scoreEntry(entry) > scoreEntry(deduped[index])) deduped[index] = entry;
     }
-    return Array.from(byKey.values()).map(({ textLength, ...entry }) => entry).slice(0, 30);
+    return deduped.map(({ textLength, strongItemSelector, ...entry }) => entry).slice(0, 30);
   }
 
   function isCompleteCanonicalDetail(record, url) {
@@ -1177,9 +1250,9 @@
         detailScanComplete: false,
         forceRecordType: pageType === 'return' ? 'return' : 'order'
       });
-      const domNames = extractItemNamesFromContainer(container);
-      const asins = extractAsins(container);
-      if (domNames.length && !(pageType === 'return' && record.itemNames?.length)) record.itemNames = domNames;
+      const domNames = pageType === 'return' ? [] : extractItemNamesFromContainer(container);
+      const asins = pageType === 'return' ? [] : extractAsins(container);
+      if (domNames.length) record.itemNames = domNames;
       record.asins = asins;
 
       if (historyPage && record.recordType === 'order' && !detailByOrder.get(orderId)) {
@@ -1226,6 +1299,7 @@
               returnGroupRefundAmount: groupRefundAmount,
               refundAmountScope: itemRefund != null || (singleItemGroup && groupRefundAmount != null) ? 'item' : (groupRefundAmount != null ? 'return' : null),
               itemIdentitySource: (item.itemName || item.asin) ? 'return-page-item' : null,
+              itemAsinEvidenceSource: item.asinEvidenceSource || null,
               provisionalReturn: false,
               authoritativeReturnCapture: true
             };
@@ -1237,7 +1311,9 @@
           record.authoritativeReturnCapture = true;
           record.returnGroupRefundAmount = groupRefundAmount;
           record.refundAmountScope = (record.itemNames || []).length === 1 ? 'item' : (groupRefundAmount != null ? 'return' : null);
-          record.itemIdentitySource = (record.itemNames || []).length ? 'return-page-item' : null;
+          record.asins = [];
+          record.itemAsinEvidenceSource = null;
+          record.itemIdentitySource = (record.itemNames || []).length ? 'return-page-text' : null;
           record.recordId = makeRecordId(record);
           records.push(record);
         }
@@ -1394,6 +1470,10 @@
     isOrderDetailPage,
     isOrderHistoryPage,
     closestContainerForOrder,
+    historyContainerForOrder,
+    structuralHistoryContainerForOrder,
+    coherentSingleOrderHistoryCard,
+    extractBoundProductEvidence,
     extractItemNamesFromContainer,
     orderIdFromUrl
   };

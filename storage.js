@@ -184,8 +184,10 @@
 
     const existingAsins = new Set((existing.asins || []).map(value => String(value || '').toUpperCase()).filter(Boolean));
     const incomingAsins = new Set((incoming.asins || []).map(value => String(value || '').toUpperCase()).filter(Boolean));
+    const strongIncomingAsin = incoming.itemIdentitySource === 'order-detail-return-link' ||
+      ['return-item-data-asin', 'return-item-direct-product-anchor'].includes(String(incoming.itemAsinEvidenceSource || ''));
     let asinConflict = false;
-    if (existingAsins.size && incomingAsins.size) {
+    if (strongIncomingAsin && existingAsins.size && incomingAsins.size) {
       let overlap = false;
       for (const asin of existingAsins) if (incomingAsins.has(asin)) overlap = true;
       asinConflict = !overlap;

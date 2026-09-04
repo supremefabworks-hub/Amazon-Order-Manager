@@ -400,6 +400,13 @@ The historical exact v0.16.0 package remains archived under `source-snapshots/v0
 It is recovery/audit material only. Do not replace the complete v0.18 root with v0.16 unless current root is proven corrupt and rollback is intentional.
 
 
-## v0.18.4 terminal cancelled-order handling
+## v0.18.5 terminal cancelled-order handling
 
-Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is explicitly Cancelled, totals `$0.00`, and has no real Order Details link. v0.18.4 treats only that strongly proven terminal history-card shape as complete for the crawl gate without setting `detailScanComplete`. Normal missing-detail orders still stop. Issue #19 is the live tracker. The second PC should test unattended `0.18.3 -> 0.18.4` update; do not reinstall or manually Reload for that proof.
+Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is explicitly Cancelled, totals `$0.00`, and has no real Order Details link. v0.18.5 treats only that strongly proven terminal history-card shape as complete for the crawl gate without setting `detailScanComplete`. Normal missing-detail orders still stop. Issue #19 is the live tracker. The second PC should test unattended `0.18.3 -> 0.18.4` update; do not reinstall or manually Reload for that proof.
+
+
+### v0.18.5 live fixes
+- Structural single-order history-card locator handles orders with no Detail anchor without neighboring-order contamination.
+- `$0.00` terminal cancelled exception remains strict and now receives the correct scoped card.
+- Broad return-page product links no longer create ASIN identity; only directly bound item ASIN evidence may conflict with trusted Order Details identity.
+- Live examples motivating the identity fix: RAMPOW order `111-1110034-5588263` and Milton order `111-8528386-2632255`.

@@ -535,3 +535,85 @@ assert(p.terminalCancelledHistoryEvidence(cancelledCardText.replace('$0.00', '$1
 assert(p.terminalCancelledHistoryEvidence(cancelledCardText.replace('\nCancelled\n', '\nCancellation requested\n'), cancelledOrderId).complete === false, 'ambiguous cancellation prose must not satisfy terminal gate');
 assert(p.terminalCancelledHistoryEvidence(cancelledCardText.replace(cancelledOrderId, '112-0000000-0000000'), cancelledOrderId).complete === false, 'terminal evidence must be bound to the same visible Order ID');
 console.log('v0.18.4 terminal cancellation parser regressions passed');
+
+
+// v0.18.5 structural no-detail history-card scoping regressions
+function v185FakeNode(text, parent = null, anchors = [], attrs = {}) {
+  return {
+    innerText: text, textContent: text, parentElement: parent,
+    getAttribute(name) { return attrs[name] ?? null; },
+    querySelector() { return null; },
+    querySelectorAll(selector) {
+      if (selector === 'a[href]' || selector.includes('a[href*="/dp/"]') || selector.includes('a[href*="/gp/product/"]') || selector.includes('a[href*="/product/"]')) return anchors;
+      return [];
+    }
+  };
+}
+function v185ProductAnchor(asin, title, parent = null) {
+  return {
+    innerText: title, textContent: title, parentElement: parent, href: `https://www.amazon.com/dp/${asin}`,
+    getAttribute(name) { if (name === 'href') return `/dp/${asin}`; if (name === 'title') return title; return null; },
+    querySelector() { return null; }, closest() { return null; }
+  };
+}
+const v185LiveCancelledId = '112-3886192-2097013';
+const v185CancelledProduct = v185ProductAnchor('B0FN37J39V', 'HHZL Rubber Edge Trim T Molding Seal Strip');
+const v185CancelledCardText = `Order placed\nJune 10, 2026\nTotal\n$0.00\nOrder # ${v185LiveCancelledId}\nCancelled\nHHZL Rubber Edge Trim T Molding Seal Strip`;
+const v185CancelledCardNode = v185FakeNode(v185CancelledCardText, null, [v185CancelledProduct]);
+const v185CancelledOrderNumberNode = v185FakeNode(`Order # ${v185LiveCancelledId}`, v185CancelledCardNode, []);
+const v185NeighboringAncestor = v185FakeNode(`Order placed\nJune 11, 2026\nTotal\n$10.00\nOrder # 113-1111111-1111111\n${v185CancelledCardText}\nOrder placed\nJune 9, 2026\nTotal\n$20.00\nOrder # 113-2222222-2222222`, null, [v185CancelledProduct]);
+v185CancelledCardNode.parentElement = v185NeighboringAncestor;
+const v185StructuralDoc = {
+  querySelectorAll(selector) {
+    if (selector === 'a[href]') return [];
+    if (['span','a','div','li','[data-order-id]','[data-orderid]','[data-order-number]'].includes(selector)) return [v185CancelledOrderNumberNode, v185CancelledCardNode, v185NeighboringAncestor];
+    return [];
+  }
+};
+const v185IsolatedCancelled = p.historyContainerForOrder(v185StructuralDoc, v185LiveCancelledId);
+assert(v185IsolatedCancelled === v185CancelledCardNode, 'no-detail cancelled order must resolve to its own single-order card, not a neighboring multi-order ancestor');
+const v185IsolatedTerminal = p.terminalCancelledHistoryEvidence(v185IsolatedCancelled.innerText, v185LiveCancelledId);
+assert(v185IsolatedTerminal.complete === true, 'isolated cancelled $0.00 card must satisfy terminal evidence');
+assert(p.coherentSingleOrderHistoryCard(v185NeighboringAncestor, v185LiveCancelledId) === false, 'multi-order ancestor must never qualify as a coherent single-order card');
+
+// v0.18.5 return-page identity regressions
+const v185UnrelatedAnchor = v185ProductAnchor('B000000099', 'Unrelated recommendation');
+const v185BroadReturnBox = v185FakeNode('Return item\nRAMPOW Micro USB Cable 2 Pack 3.3ft\nQuantity: 1\nRefund amount $6.99', null, [v185UnrelatedAnchor]);
+v185BroadReturnBox.querySelectorAll = selector => {
+  if (selector === '.a-box') return [v185BroadReturnBox];
+  if (selector.includes('a[href*="/dp/"]')) return [v185UnrelatedAnchor];
+  return [];
+};
+const v185BroadEntries = p.extractReturnItemEntries(v185BroadReturnBox);
+assert(v185BroadEntries.length === 1, 'broad return text should still produce one item entry');
+assert(v185BroadEntries[0].itemName && /RAMPOW/i.test(v185BroadEntries[0].itemName), 'return-specific text must win for the item name');
+assert(v185BroadEntries[0].asin == null && v185BroadEntries[0].asinEvidenceSource == null, 'unrelated product link in broad return section must not become ASIN identity');
+
+const v185StrongReturnAnchor = v185ProductAnchor('B000000002', 'Different Product');
+const v185StrongReturnItem = v185FakeNode('Return item\nDifferent Product\nQuantity: 1\nRefund amount $10.00', null, [v185StrongReturnAnchor], {'data-asin':'B000000002'});
+v185StrongReturnItem.querySelectorAll = selector => {
+  if (selector === '[data-asin]') return [v185StrongReturnItem];
+  if (selector.includes('a[href*="/dp/"]')) return [v185StrongReturnAnchor];
+  return [];
+};
+const v185StrongEntries = p.extractReturnItemEntries(v185StrongReturnItem);
+assert(v185StrongEntries.length === 1 && v185StrongEntries[0].asin === 'B000000002', 'direct data-asin item block must preserve strong ASIN evidence');
+assert(v185StrongEntries[0].asinEvidenceSource === 'return-item-data-asin', 'strong return ASIN must record its binding source');
+console.log('v0.18.5 structural scope and return identity parser regressions passed');
+
+
+// v0.18.5 strong+weak duplicate collapse regression
+const v185DuplicateAnchor = v185ProductAnchor('B000000003', 'Duplicate Returned Product');
+const v185StrongChild = v185FakeNode('Return item\nDuplicate Returned Product\nQuantity: 1\nRefund amount $9.99', null, [v185DuplicateAnchor], {'data-asin':'B000000003'});
+const v185BroadParent = v185FakeNode('Return item\nDuplicate Returned Product\nQuantity: 1\nRefund amount $9.99', null, [v185DuplicateAnchor]);
+const v185CompositeReturn = {
+  querySelectorAll(selector) {
+    if (selector === '[data-asin]') return [v185StrongChild];
+    if (selector === '.a-box') return [v185BroadParent];
+    return [];
+  }
+};
+const v185CollapsedEntries = p.extractReturnItemEntries(v185CompositeReturn);
+assert(v185CollapsedEntries.length === 1, 'specific and broad representations of the same return item must collapse to one child');
+assert(v185CollapsedEntries[0].asin === 'B000000003' && v185CollapsedEntries[0].asinEvidenceSource === 'return-item-data-asin', 'strong item-specific evidence must win duplicate collapse');
+console.log('v0.18.5 duplicate return item collapse regression passed');

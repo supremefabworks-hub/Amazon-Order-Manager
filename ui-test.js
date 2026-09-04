@@ -42,3 +42,8 @@ assert(dashboard.includes('Terminal history'), 'dashboard must distinguish termi
 assert(dashboard.includes('orders complete'), 'dashboard checkpoint must include terminal-complete orders without calling them Detail captures');
 
 console.log('ui regression tests passed');
+
+const parserSourceV0185 = fs.readFileSync(__dirname + '/parser.js', 'utf8');
+assert(parserSourceV0185.includes("pageType === 'return' ? [] : extractAsins(container)"), 'broad return-page product identity must stay disabled');
+assert(parserSourceV0185.includes('structuralHistoryContainerForOrder'), 'no-detail history cards must have structural scoping');
+assert(fs.readFileSync(__dirname + '/storage.js', 'utf8').includes('itemAsinEvidenceSource'), 'identity conflicts must require bound ASIN evidence');
