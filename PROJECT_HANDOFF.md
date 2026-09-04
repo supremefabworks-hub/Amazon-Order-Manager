@@ -438,3 +438,11 @@ Live v0.18.3 stopped on 2026 page 6 because order `112-3886192-2097013` is expli
 - Main ledger views are complete-only; Processing and Errors isolate partial/failed work. Successful retries clear the error and move the order into normal views.
 - Completed orders prefer authoritative return captures when real return-status links exist.
 - Added search across ASIN/card/order/product/status plus status/year/card filters and sort modes. Issue #29 tracks live acceptance.
+
+
+## v0.18.10 dashboard cleanup
+- Issue #31.
+- Remove duplicate `Order details` stat; `Complete orders` is the canonical completed-order metric and includes captured order-total dollars.
+- Processing remains internal/hidden; user-facing views are exactly Orders, Returns, Return review, Errors.
+- No crawler/parser/lifecycle/data-completeness semantics changed.
+- Manifest/package v0.18.10; live acceptance after verified dev release.

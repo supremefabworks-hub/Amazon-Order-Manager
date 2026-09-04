@@ -299,3 +299,10 @@ A user-testable development build may merge only after `npm test` and PR CI pass
 4. RAMPOW `111-1110034-5588263`: verify Refund issued can be complete while Refund credited remains pending.
 5. Confirm All orders/Returns/Needs review show only complete orders. Observe in-flight records under Processing and force an order failure to verify exact error text under Errors; Refresh should retry and clear the error on success.
 6. Exercise text search plus status/year/card filters and every sort mode.
+
+
+## v0.18.10 dashboard acceptance
+- Confirm top stats show Complete orders, Returns, Return review, Errors only.
+- Confirm there is no separate Order details or Processing stat.
+- Confirm navigation is exactly Orders, Returns, Return review, Errors.
+- Confirm incomplete non-error orders remain hidden while scanner progress still reports queued/in-flight work.

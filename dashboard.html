@@ -25,10 +25,9 @@
     <section class="stats" id="stats"></section>
 
     <section class="panel view-menu" aria-label="Ledger views">
-      <button class="view-button" data-view="all">All orders <span id="navAllCount">0</span></button>
+      <button class="view-button" data-view="all">Orders <span id="navAllCount">0</span></button>
       <button class="view-button" data-view="returns">Returns <span id="navReturnCount">0</span></button>
-      <button class="view-button" data-view="needs_review">Needs review <span id="navReviewCount">0</span></button>
-      <button class="view-button" data-view="processing">Processing <span id="navProcessingCount">0</span></button>
+      <button class="view-button" data-view="needs_review">Return review <span id="navReviewCount">0</span></button>
       <button class="view-button" data-view="errors">Errors <span id="navErrorCount">0</span></button>
     </section>
 
@@ -64,7 +63,7 @@
         <option value="return_received">Return received</option>
         <option value="refund_issued">Refund issued</option>
         <option value="refund_credited">Refund credited</option>
-        <option value="needs_review">Needs review</option>
+        <option value="needs_review">Return review</option>
         <option value="cancelled">Cancelled</option>
       </select>
       <select id="yearFilter" aria-label="Filter by order year"><option value="all">All years</option></select>

@@ -72,7 +72,7 @@ console.log('v0.18.8 Amazon/bank separation UI regressions passed');
 
 const dashboardHtmlV0189 = fs.readFileSync(__dirname + '/dashboard.html', 'utf8');
 const dashboardSourceV0189 = fs.readFileSync(__dirname + '/dashboard.js', 'utf8');
-assert(dashboardHtmlV0189.includes('data-view="processing"') && dashboardHtmlV0189.includes('data-view="errors"'), 'dashboard must separate Processing and Errors from completed orders');
+assert(!dashboardHtmlV0189.includes('data-view="processing"') && dashboardHtmlV0189.includes('data-view="errors"'), 'Processing must remain internal while Errors remains user-facing');
 for (const id of ['statusFilter','yearFilter','cardFilter','sortOrder']) assert(dashboardHtmlV0189.includes(`id="${id}"`), `dashboard must render ${id}`);
 assert(dashboardSourceV0189.includes("currentView === 'all' && !row.dataComplete"), 'All orders must hide incomplete records');
 assert(dashboardSourceV0189.includes('authoritativeReturnCapture === true'), 'completed orders with return links must prefer authoritative return records');
@@ -80,3 +80,17 @@ assert(dashboardSourceV0189.includes("currentView === 'errors' && !row.processin
 assert(dashboardSourceV0189.includes("mode === 'order_high'") && dashboardSourceV0189.includes("mode === 'refund_low'"), 'sort controls must support monetary ordering');
 assert(dashboardSourceV0189.includes('...(row.asins || [])'), 'text search must include ASIN evidence');
 console.log('v0.18.9 complete-ledger query UI regressions passed');
+
+
+const dashboardHtmlV01810 = fs.readFileSync(__dirname + '/dashboard.html', 'utf8');
+const dashboardSourceV01810 = fs.readFileSync(__dirname + '/dashboard.js', 'utf8');
+for (const view of ['all','returns','needs_review','errors']) assert(dashboardHtmlV01810.includes(`data-view="${view}"`), `v0.18.10 must retain ${view} navigation`);
+assert(!dashboardHtmlV01810.includes('data-view="processing"'), 'Processing must remain internal and not be a user-facing tab');
+assert(dashboardHtmlV01810.includes('>Orders <') && dashboardHtmlV01810.includes('>Return review <'), 'navigation labels must be Orders and Return review');
+assert(!dashboardSourceV01810.includes("currentView === 'processing'"), 'dashboard must not expose a Processing view');
+assert((dashboardSourceV01810.match(/<span>Complete orders<\/span>/g) || []).length === 1, 'dashboard must render exactly one Complete orders metric');
+assert(!dashboardSourceV01810.includes('<span>Order details</span>'), 'redundant Order details metric must be removed');
+assert(!dashboardSourceV01810.includes('<span>Processing</span>'), 'Processing top metric must be removed');
+assert(dashboardSourceV01810.includes('captured order total · fully processed canonical orders'), 'Complete orders metric must combine count meaning and captured-dollar context');
+assert(dashboardSourceV01810.includes('<span>Return review</span>'), 'review stat must use Return review label');
+console.log('v0.18.10 consolidated dashboard metrics regressions passed');
