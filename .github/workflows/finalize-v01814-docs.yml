@@ -1,0 +1,33 @@
+name: Finalize v0.18.14 source-of-truth docs
+
+on:
+  push:
+    branches: [v01814-durable-resume-autostart]
+    paths:
+      - '.github/workflows/finalize-v01814-docs.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v01814-durable-resume-autostart
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Finalize current source-of-truth docs
+        run: python3 tools/finalize_v01814_docs.py
+      - name: Validate final candidate
+        run: npm test
+      - name: Commit final docs and remove temporary machinery
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f tools/finalize_v01814_docs.py .github/workflows/finalize-v01814-docs.yml
+          git add -A
+          git commit -m 'Finalize v0.18.14 durable resume source of truth [v01814-docs]'
+          git push origin HEAD:v01814-durable-resume-autostart
